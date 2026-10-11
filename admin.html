@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>약사 전용 만성질환 정밀 문진 접수 대장</title>
+  <!-- Tailwind CSS & Supabase SDK -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <style>
+    body { 
+      font-family: -apple-system, BlinkMacSystemFont, "Pretendard", "Segoe UI", Roboto, sans-serif;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    /* 1. 모바일 (768px 미만): 1열 전환 */
+    @media (max-width: 767px) {
+      #queueAside { display: flex; width: 100%; }
+      #detailMain { display: none; width: 100%; }
+      body.show-detail #queueAside { display: none !important; }
+      body.show-detail #detailMain { display: flex !important; }
+      .desktop-only { display: none !important; }
+    }
+
+    /* 2. PC/태블릿 (768px 이상): 좌우 2분할 고정 */
+    @media (min-width: 768px) {
+      #queueAside { display: flex !important; width: 22rem; flex-shrink: 0; }
+      #detailMain { display: flex !important; flex: 1; }
+      .mobile-only { display: none !important; }
+    }
+
+    .custom-scroll { -webkit-overflow-scrolling: touch; }
+
+    @media print {
+      .no-print { display: none !important; }
+      body { background: white !important; overflow: visible !important; height: auto !important; }
+      #detailMain { display: block !important; padding: 0 !important; overflow: visible !important; }
+      #detailCard { border: none !important; box-shadow: none !important; padding: 0 !important; max-width: 100% !important; }
+    }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-800 antialiased h-screen h-[100dvh] flex flex-col overflow-hidden">
+
+  <!-- 상단 네비게이션 헤더 -->
+  <header class="bg-slate-900 text-white min-h-[52px] py-2 px-3 sm:px-5 flex items-center justify-between shadow-sm flex-shrink-0 no-print gap-2">
+    <div class="flex items-center space-x-2 overflow-hidden">
+      <span class="w-7 h-7 rounded-lg bg-emerald-500 text-slate-950 font-extrabold flex items-center justify-center text-sm flex-shrink-0">+</span>
+      <h1 class="font-bold text-sm sm:text-base tracking-tight truncate">만성질환 문진 접수 대장</h1>
+      <span class="hidden sm:inline-flex text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 items-center gap-1 flex-shrink-0">
+        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+        실시간 감시
+      </span>
+    </div>
+    <div class="flex items-center gap-2 flex-shrink-0">
+      <span id="queueCounter" class="text-[11px] sm:text-xs text-slate-400 font-mono">대기: 0건</span>
+      <button type="button" id="btnRefresh" class="px-2.5 py-1 text-xs bg-slate-800 hover:bg-slate-700 rounded-lg transition border border-slate-700 font-medium">
+        새로고침
+      </button>
+    </div>
+  </header>
+
+  <!-- 메인 레이아웃 -->
+  <div class="flex-1 flex overflow-hidden relative">
+    
+    <!-- 좌측 대기열 목록 -->
+    <aside id="queueAside" class="bg-white border-r border-slate-200 flex flex-col flex-shrink-0 no-print h-full">
+      <div class="p-3 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+        <span class="text-xs font-bold text-slate-700">접수 환자 목록</span>
+        <select id="statusFilter" class="text-xs border border-slate-300 rounded px-2 py-1 bg-white focus:outline-none">
+          <option value="ALL">전체 보기</option>
+          <option value="대기중" selected>대기중만 보기</option>
+          <option value="완료">상담 완료</option>
+        </select>
+      </div>
+
+      <div id="patientQueue" class="flex-1 overflow-y-auto divide-y divide-slate-100 custom-scroll pb-24"></div>
+    </aside>
+
+    <!-- 우측 환자 문진 상세 인스펙터 -->
+    <main id="detailMain" class="bg-slate-100 p-3.5 sm:p-6 pb-32 sm:pb-20 overflow-y-auto flex-col h-full custom-scroll">
+      
+      <div id="emptyGuide" class="h-full flex flex-col items-center justify-center text-slate-400 text-center p-6">
+        <svg class="w-16 h-16 stroke-current mb-3 opacity-30" fill="none" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+        <p class="text-sm font-medium">좌측 목록에서 환자를 선택하면 정밀 문진 내역이 표시됩니다.</p>
+      </div>
+
+      <div id="detailCard" class="hidden bg-white rounded-xl sm:rounded-2xl shadow-sm border border-slate-200 p-4 sm:p-7 space-y-5 max-w-4xl mx-auto w-full mb-10"></div>
+
+    </main>
+
+  </div>
+
+  <!-- 이미지 라이트박스 모달 -->
+  <div id="imageLightboxModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-xs z-50 hidden flex items-center justify-center p-3 no-print">
+    <div class="bg-white rounded-2xl max-w-2xl w-full p-4 shadow-2xl space-y-3 border border-slate-200" onclick="event.stopPropagation()">
+      <div class="flex items-center justify-between pb-2 border-b border-slate-100">
+        <h4 id="lightboxTitle" class="font-bold text-slate-900 text-sm truncate">사진 상세 미리보기</h4>
+        <button type="button" id="btnCloseLightbox" class="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 flex items-center justify-center font-bold text-base transition">✕</button>
+      </div>
+      <div class="bg-slate-900/5 rounded-xl p-2 flex items-center justify-center min-h-[260px] max-h-[70vh] overflow-hidden">
+        <img id="lightboxImg" src="" alt="사진 원본" class="max-h-[65vh] w-auto max-w-full rounded-lg object-contain">
+      </div>
+      <div class="flex justify-end pt-1">
+        <button type="button" id="btnConfirmCloseLightbox" class="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-xs font-semibold">닫기</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // 1. Supabase 연동 설정
+    const SUPABASE_URL = "https://qyvrlojwagbjjmcaaffe.supabase.co";
+    const SUPABASE_ANON_KEY = "sb_publishable_Sk7CTdSeRnBTYeK-9Key_g_msHrna8I";
+    const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    let allIntakes = [];
+    let selectedIndex = -1;
+    let currentPhotos = [];
+
+    // 2. 대기 목록 데이터 로드 함수
+    async function fetchIntakeList() {
+      const filterEl = document.getElementById('statusFilter');
+      const filter = filterEl ? filterEl.value : 'ALL';
+
+      try {
+        let query = supabaseClient.from('intakes').select('*').order('created_at', { ascending: false });
+        if (filter !== 'ALL') {
+          query = query.eq('status', filter);
+        }
+
+        const res = await query;
+        if (res.error) throw res.error;
+
+        allIntakes = res.data || [];
+        renderQueue();
+
+        const pendingCount = allIntakes.filter(i => i.status === '대기중').length;
+        const counterEl = document.getElementById('queueCounter');
+        if (counterEl) {
+          counterEl.innerText = `대기: ${pendingCount}건 | 총 ${allIntakes.length}건`;
+        }
+
+        if (selectedIndex >= 0 && selectedIndex < allIntakes.length) {
+          renderDetail(allIntakes[selectedIndex]);
+        }
+      } catch (err) {
+        console.error("데이터 조회 실패:", err);
+      }
+    }
+
+    // 3. 목록 렌더링
+    function renderQueue() {
+      const container = document.getElementById('patientQueue');
+      if (!container) return;
+
+      if (allIntakes.length === 0) {
+        container.innerHTML = '<div class="p-8 text-center text-xs text-slate-400">접수된 문진표가 없습니다.</div>';
+        return;
+      }
+
+      container.innerHTML = allIntakes.map((item, idx) => {
+        const isSelected = idx === selectedIndex;
+        const time = new Date(item.created_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+        
+        let rfBadge = '';
+        if (item.rf_level === 'emergency_119') rfBadge = '<span class="px-1.5 py-0.5 rounded text-[10px] bg-rose-600 text-white font-bold">🚨 119응급</span>';
+        else if (item.rf_level === 'sameday_hospital') rfBadge = '<span class="px-1.5 py-0.5 rounded text-[10px] bg-amber-500 text-white font-bold">⚠️ 당일내원</span>';
+
+        const isExistingText = item.is_existing === 'existing' ? '단골' : '신규';
+        const statusClass = item.status === '완료' ? 'bg-slate-200 text-slate-600' : 'bg-emerald-100 text-emerald-800 font-bold';
+        const photoCount = (item.photos && item.photos.length) ? item.photos.length : 0;
+        const activeBg = isSelected ? 'bg-emerald-50/80 border-l-4 border-emerald-600' : 'hover:bg-slate-50';
+
+        return `
+          <div onclick="selectIntake(${idx})" class="p-3.5 cursor-pointer transition text-left ${activeBg}">
+            <div class="flex items-center justify-between mb-1">
+              <div class="flex items-center gap-1.5">
+                <span class="font-bold text-sm text-slate-900">${item.patient_name || '이름 없음'}</span>
+                <span class="text-xs text-slate-500">(${item.patient_gender || '미선택'})</span>
+              </div>
+              <span class="text-[11px] text-slate-400 font-mono">${time}</span>
+            </div>
+            <div class="flex items-center gap-1.5 mb-1.5 flex-wrap">
+              ${rfBadge}
+              <span class="text-[11px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-medium">${isExistingText}</span>
+              <span class="text-[11px] px-1.5 py-0.5 rounded ${statusClass}">${item.status || '대기중'}</span>
+              <span class="text-[11px] text-slate-400">사진 ${photoCount}장</span>
+            </div>
+            <p class="text-xs text-rose-600 font-medium truncate">★ ${item.top_symptom || '불편 증상 없음'}</p>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // 4. 환자 선택 핸들러 (인덱스 기반)
+    function selectIntake(idx) {
+      selectedIndex = idx;
+      renderQueue();
+      const item = allIntakes[idx];
+      if (item) {
+        renderDetail(item);
+        document.body.classList.add('show-detail');
+        const mainEl = document.getElementById('detailMain');
+        if (mainEl) mainEl.scrollTop = 0;
+      }
+    }
+
+    // 5. 모바일 목록 복귀
+    function backToQueue() {
+      selectedIndex = -1;
+      renderQueue();
+      document.body.classList.remove('show-detail');
+    }
+
+    // 6. 이미지 라이트박스 열기
+    function openLightboxPhoto(photoIdx) {
+      const p = currentPhotos[photoIdx];
+      if (!p) return;
+      document.getElementById('lightboxImg').src = p.dataUrl;
+      document.getElementById('lightboxTitle').innerText = p.name || '사진 상세 미리보기';
+      document.getElementById('imageLightboxModal').classList.remove('hidden');
+    }
+
+    function closeImageLightbox() {
+      document.getElementById('imageLightboxModal').classList.add('hidden');
+      document.getElementById('lightboxImg').src = '';
+    }
+
+    // 7. 상태 토글
+    async function toggleStatus(id, currentStatus) {
+      const newStatus = currentStatus === '완료' ? '대기중' : '완료';
+      try {
+        const res = await supabaseClient.from('intakes').update({ status: newStatus }).eq('id', id);
+        if (res.error) throw res.error;
+        fetchIntakeList();
+      } catch (err) {
+        alert("상태 변경 실패: " + err.message);
+      }
+    }
+
+    // 8. 상세 화면 렌더링
+    function renderDetail(item) {
+      document.getElementById('emptyGuide').classList.add('hidden');
+      const card = document.getElementById('detailCard');
+      card.classList.remove('hidden');
+
+      currentPhotos = item.photos || [];
+      const dateStr = new Date(item.created_at).toLocaleString('ko-KR');
+
+      // 긴급 위험 신호 배너
+      let rfHtml = '';
+      if (item.rf_level !== 'none') {
+        const rfColor = item.rf_level === 'emergency_119' ? 'bg-rose-50 border-rose-300 text-rose-950' : 'bg-amber-50 border-amber-300 text-amber-950';
+        const rfTitle = item.rf_level === 'emergency_119' ? '🚨 [즉시 119/응급실 안내 발령]' : '⚠️ [당일 병원 내원 권고 발령]';
+        const rfItemsText = (item.rf_items && item.rf_items.length) ? item.rf_items.join(', ') : '내역 없음';
+
+        rfHtml = `
+          <div class="p-3.5 rounded-xl border ${rfColor} text-xs space-y-1">
+            <div class="font-bold text-sm flex items-center gap-1.5"><span>${rfTitle}</span></div>
+            <p class="font-semibold text-rose-800">환자가 선택한 위험 신호: ${rfItemsText}</p>
+          </div>
+        `;
+      }
+
+      // 사진 갤러리
+      let photosHtml = '<div class="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-400 text-center">첨부된 사진이 없습니다. (단골 전산 조회 대상 또는 미등록)</div>';
+      if (currentPhotos.length > 0) {
+        photosHtml = `
+          <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
+            ${currentPhotos.map((p, pIdx) => `
+              <div class="border border-slate-200 rounded-xl overflow-hidden bg-slate-50 p-1 cursor-pointer hover:border-emerald-500 transition group" onclick="openLightboxPhoto(${pIdx})">
+                <img src="${p.dataUrl}" alt="사진" class="w-full h-28 sm:h-32 object-cover rounded-lg group-hover:opacity-90">
+                <div class="flex items-center justify-between mt-1 px-1 text-[11px]">
+                  <span class="text-slate-700 truncate font-medium">${p.name || '사진'}</span>
+                  <span class="text-[10px] bg-slate-200 text-slate-600 px-1 rounded">${p.category || '사진'}</span>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        `;
+      }
+
+      // 직접 입력 표
+      let directMedsHtml = '';
+      if (item.direct_meds && item.direct_meds.length > 0) {
+        directMedsHtml = `
+          <div class="border border-slate-200 rounded-xl p-3 bg-white space-y-2 text-xs overflow-x-auto">
+            <h3 class="font-bold text-xs sm:text-sm text-slate-900">환자 직접 표 입력 목록</h3>
+            <table class="w-full text-left border-collapse min-w-[280px]">
+              <thead><tr class="border-b text-slate-500 text-[11px]"><th class="pb-1">약품명</th><th class="pb-1">용량</th><th class="pb-1">복용법/메모</th></tr></thead>
+              <tbody class="divide-y divide-slate-100">
+                ${item.direct_meds.map(m => `
+                  <tr>
+                    <td class="py-1.5 font-bold text-slate-800">${m.name || ''}</td>
+                    <td class="py-1.5 text-slate-600">${m.dose || ''}</td>
+                    <td class="py-1.5 text-slate-600">${m.note || ''}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        `;
+      }
+
+      // 복용법 메모
+      let dosageMemoHtml = '';
+      if (item.dosage_memo) {
+        dosageMemoHtml = `
+          <div class="bg-amber-50 p-3 rounded-xl border border-amber-200 text-xs">
+            <span class="font-bold text-amber-900 block mb-1">💊 환자가 실제 복용 중인 방법:</span>
+            <p class="text-slate-800 whitespace-pre-wrap leading-relaxed">${item.dosage_memo}</p>
+          </div>
+        `;
+      }
+
+      // 임의 중단 세부
+      let skippedSubHtml = '';
+      if (item.has_skipped === 'yes') {
+        const skippedTypesText = (item.skipped_types && item.skipped_types.length) ? item.skipped_types.join(', ') : '미입력';
+        const skippedReasonsText = (item.skipped_reasons && item.skipped_reasons.length) ? item.skipped_reasons.join(', ') : '미입력';
+        skippedSubHtml = `
+          <div><span class="text-slate-400">중단 약품:</span> <span class="font-semibold">${skippedTypesText}</span></div>
+          <div><span class="text-slate-400">중단 이유:</span> <strong class="text-rose-700">${skippedReasonsText}</strong></div>
+        `;
+      }
+
+      const existingBadgeClass = item.is_existing === 'existing' ? 'text-emerald-700' : 'text-blue-700';
+      const existingBadgeText = item.is_existing === 'existing' ? '단골 환자' : '신규 환자';
+      const btnStatusClass = item.status === '완료' ? 'bg-slate-100 text-slate-700' : 'bg-emerald-600 text-white';
+      const btnStatusText = item.status === '완료' ? '대기중으로 변경' : '✓ 검토 완료 처리';
+
+      card.innerHTML = `
+        <!-- 모바일 전용 뒤로가기 -->
+        <div class="mobile-only pb-2 border-b border-slate-100 flex items-center justify-between no-print">
+          <button type="button" onclick="backToQueue()" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition">
+            <span>← 접수 목록으로</span>
+          </button>
+          <span class="text-xs font-mono text-slate-400 font-semibold">${item.status || '대기중'}</span>
+        </div>
+
+        <!-- 헤더 정보 -->
+        <div class="flex flex-col sm:flex-row sm:items-start justify-between border-b pb-4 border-slate-200 gap-3">
+          <div>
+            <div class="flex items-center gap-2 mb-1 flex-wrap">
+              <h2 class="text-xl sm:text-2xl font-bold text-slate-900">${item.patient_name || '환자'}</h2>
+              <span class="text-xs px-2 py-0.5 bg-slate-100 text-slate-600 font-mono rounded font-bold">${item.patient_birth || '생년월일 미입력'}</span>
+              <span class="text-xs px-2 py-0.5 bg-slate-100 text-slate-600 font-mono rounded font-bold">${item.patient_phone || '연락처 미입력'}</span>
+            </div>
+            <p class="text-[11px] sm:text-xs text-slate-400 font-mono">접수일시: ${dateStr}</p>
+          </div>
+          <div class="flex items-center gap-2 no-print flex-shrink-0">
+            <button type="button" onclick="toggleStatus('${item.id}', '${item.status || '대기중'}')" class="flex-1 sm:flex-initial px-3.5 py-1.5 text-xs font-bold rounded-lg border ${btnStatusClass} transition">
+              ${btnStatusText}
+            </button>
+            <button type="button" onclick="window.print()" class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-800 text-white hover:bg-slate-700">인쇄</button>
+          </div>
+        </div>
+
+        ${rfHtml}
+
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+          <div><span class="text-slate-400 block mb-0.5 text-[11px]">단골 구분</span><strong class="${existingBadgeClass}">${existingBadgeText}</strong></div>
+          <div><span class="text-slate-400 block mb-0.5 text-[11px]">타 의료기관 약</span><strong class="${item.other_meds === 'yes' ? 'text-rose-600' : ''}">${item.other_meds === 'yes' ? '있음 (주의)' : '없음'}</strong></div>
+          <div><span class="text-slate-400 block mb-0.5 text-[11px]">임신/수유 여부</span><strong>${item.is_pregnant || '해당없음'}</strong></div>
+          <div><span class="text-slate-400 block mb-0.5 text-[11px]">약물 알레르기</span><strong class="text-rose-600">${item.allergy || '없음'}</strong></div>
+        </div>
+
+        <div>
+          <h3 class="text-xs sm:text-sm font-bold text-slate-900 mb-2">첨부된 사진 목록 (${currentPhotos.length}장)</h3>
+          ${photosHtml}
+        </div>
+
+        ${directMedsHtml}
+        ${dosageMemoHtml}
+
+        <div class="border border-slate-200 rounded-xl p-3.5 bg-white space-y-2 text-xs">
+          <h3 class="font-bold text-xs sm:text-sm text-slate-900 border-b pb-1.5 border-slate-100">호소 증상 및 인과성 평가</h3>
+          <div><span class="text-slate-400">선택 증상:</span> <span class="font-semibold text-slate-800">${(item.symptoms && item.symptoms.length) ? item.symptoms.join(', ') : '없음'}</span></div>
+          <div><span class="text-slate-400">가장 불편한 1순위 증상(★):</span> <span class="font-bold text-rose-600 text-sm">${item.top_symptom || '없음'}</span></div>
+          <div class="grid grid-cols-2 gap-2 pt-1.5 border-t border-slate-100">
+            <div><span class="text-slate-400">발생 시점:</span> <strong>${item.duration || '미선택'}</strong></div>
+            <div><span class="text-slate-400">약 변경 선후관계:</span> <strong>${item.timing_relation || '미선택'}</strong></div>
+          </div>
+        </div>
+
+        <div class="border border-slate-200 rounded-xl p-3.5 bg-white text-xs space-y-1.5">
+          <h3 class="font-bold text-xs sm:text-sm text-slate-900 border-b pb-1.5 border-slate-100">약 복용 실천 점검 (비순응)</h3>
+          <div><span class="text-slate-400">임의 중단 여부:</span> <strong class="${item.has_skipped === 'yes' ? 'text-rose-600' : 'text-slate-700'}">${item.has_skipped === 'yes' ? '있음 (임의 중단 경험)' : '처방대로 복용 중'}</strong></div>
+          ${skippedSubHtml}
+        </div>
+
+        <div class="border border-slate-200 rounded-xl p-3.5 bg-white text-xs space-y-1.5">
+          <h3 class="font-bold text-xs sm:text-sm text-slate-900 border-b pb-1.5 border-slate-100">처방 밖 약물(OTC) & 영양제</h3>
+          <div><span class="text-slate-400">자주 사 먹는 약/식품:</span> <strong>${(item.otc_categories && item.otc_categories.length) ? item.otc_categories.join(', ') : '없음'}</strong></div>
+          <div><span class="text-slate-400">영양제 제품명:</span> <strong>${item.supple_names || '없음'}</strong></div>
+          <div><span class="text-slate-400">복약 시간 규칙성:</span> <strong>${item.timing_habit || '미선택'}</strong></div>
+        </div>
+
+        <!-- 8. 환자 최우선 핵심 질문 -->
+        <div class="bg-emerald-50 p-3.5 rounded-xl border border-emerald-200 text-xs">
+          <span class="font-bold text-emerald-900 block mb-1">💡 환자가 가장 궁금해하는 질문 (1-Pick):</span>
+          <p class="text-emerald-950 font-bold text-sm leading-relaxed">${item.main_question || '미선택'}</p>
+        </div>
+
+        <!-- [신규 추가] 회신서 작성 버튼 바 -->
+        <div class="pt-4 border-t border-slate-200 flex gap-2.5 no-print">
+          <button type="button" onclick="openReplyEditor()" class="flex-1 py-3.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-sm transition flex items-center justify-center gap-2 text-sm sm:text-base">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+            </svg>
+            <span>이 환자 맞춤 복약 회신서 작성하기</span>
+          </button>
+        </div>
+
+        <div class="h-16 sm:h-6"></div>
+      `;
+    }
+
+    // [신규 추가] 선택된 환자 문진 데이터를 세션에 담아 회신서 작성창 오픈
+    function openReplyEditor() {
+      if (selectedIndex < 0 || !allIntakes[selectedIndex]) {
+        alert("선택된 환자 데이터가 없습니다.");
+        return;
+      }
+
+      const selectedPatient = allIntakes[selectedIndex];
+      
+      // 브라우저 세션 스토리지에 환자 데이터 전체 저장
+      sessionStorage.setItem('selected_patient_intake', JSON.stringify(selectedPatient));
+      
+      // 새 탭(또는 현재 탭)으로 회신서 페이지 열기
+      window.open('reply.html', '_blank');
+    }
+
+    // 9. 이벤트 리스너 안전 바인딩
+    document.getElementById('btnRefresh').addEventListener('click', fetchIntakeList);
+    document.getElementById('statusFilter').addEventListener('change', fetchIntakeList);
+    document.getElementById('btnCloseLightbox').addEventListener('click', closeImageLightbox);
+    document.getElementById('btnConfirmCloseLightbox').addEventListener('click', closeImageLightbox);
+    document.getElementById('imageLightboxModal').addEventListener('click', closeImageLightbox);
+
+    // 10. 전역 함수 등록
+    window.selectIntake = selectIntake;
+    window.backToQueue = backToQueue;
+    window.openLightboxPhoto = openLightboxPhoto;
+    window.toggleStatus = toggleStatus;
+    window.openReplyEditor = openReplyEditor;
+
+    // 11. 실시간 웹소켓 구독
+    supabaseClient
+      .channel('realtime-intakes')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'intakes' }, () => {
+        const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+        audio.play().catch(() => {});
+        fetchIntakeList();
+      })
+      .subscribe();
+
+    // 초기 실행
+    window.addEventListener('DOMContentLoaded', fetchIntakeList);
+    fetchIntakeList();
+  </script>
+</body>
+</html>
