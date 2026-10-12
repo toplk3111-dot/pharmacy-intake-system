@@ -70,9 +70,9 @@
             <option value="완료">상담 완료</option>
           </select>
         </div>
-        <!-- 🔍 이름 / 생년월일 검색 입력창 -->
+        <!-- 🔍 이름 / 생년월일 검색 입력창 (자동완성 방지 적용) -->
         <div class="relative">
-          <input type="text" id="patientSearchInput" oninput="handlePatientSearch()" placeholder="환자명 또는 생년월일(6자리) 검색..." class="w-full text-xs pl-7 pr-7 py-1.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500 bg-white">
+          <input type="text" id="patientSearchInput" autocomplete="off" oninput="handlePatientSearch()" placeholder="환자명 또는 생년월일(6자리) 검색..." class="w-full text-xs pl-7 pr-7 py-1.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500 bg-white">
           <span class="absolute left-2.5 top-1.5 text-slate-400 text-xs">🔍</span>
           <button type="button" id="btnSearchClear" onclick="clearPatientSearch()" class="hidden absolute right-2 top-1.5 text-slate-400 hover:text-slate-600 text-xs font-bold w-4 h-4 rounded-full flex items-center justify-center">✕</button>
         </div>
@@ -145,38 +145,35 @@
     }
 
     let allIntakes = [];
-    let filteredIntakes = []; // 검색 및 필터가 적용된 환자 목록
-    let selectedId = null;    // 현재 선택된 환자의 DB 고유 ID
+    let filteredIntakes = [];
+    let selectedId = null;
     let currentPhotos = [];
     let selectedPhotoIndex = 0;
     let currentConfirmedMeds = [];
 
     // ========================================================
-    // 3. 대기 목록 데이터 로드 및 검색 필터링
+    // 3. 대기 목록 데이터 로드 (NULL 값 안전 포용 쿼리)
     // ========================================================
     async function fetchIntakeList() {
-      const filterEl = document.getElementById('statusFilter');
-      const filter = filterEl ? filterEl.value : 'ALL';
-
       try {
-        let query = supabaseClient.from('intakes').select('*').order('created_at', { ascending: false });
-        if (filter !== 'ALL') {
-          query = query.eq('status', filter);
-        }
+        // 서버에서는 전체 데이터를 안정적으로 불러오고 클라이언트에서 NULL을 대기로 유연하게 처리
+        const { data, error } = await supabaseClient
+          .from('intakes')
+          .select('*')
+          .order('created_at', { ascending: false });
 
-        const res = await query;
-        if (res.error) throw res.error;
+        if (error) throw error;
 
-        allIntakes = res.data || [];
+        allIntakes = data || [];
         applyFilterAndSearch();
 
-        const pendingCount = allIntakes.filter(i => i.status === '대기중').length;
+        // status가 '완료'가 아닌 모든 건(NULL, 빈값, '대기중')을 대기 건수로 정확히 집계
+        const pendingCount = allIntakes.filter(i => (i.status || '대기중') !== '완료').length;
         const counterEl = document.getElementById('queueCounter');
         if (counterEl) {
           counterEl.innerText = `대기: ${pendingCount}건 \vert{} 총 ${allIntakes.length}건`;
         }
 
-        // 현재 선택되어 있던 환자가 있으면 상세 화면 동기화
         if (selectedId) {
           const currentPatient = allIntakes.find(i => i.id === selectedId);
           if (currentPatient) {
@@ -208,23 +205,34 @@
       applyFilterAndSearch();
     }
 
+    // 상태 필터 & 검색어 결합 필터링
     function applyFilterAndSearch() {
+      const filterEl = document.getElementById('statusFilter');
+      const filter = filterEl ? filterEl.value : '대기중';
       const searchKeyword = (document.getElementById('patientSearchInput')?.value || '').trim().toLowerCase();
 
-      if (!searchKeyword) {
-        filteredIntakes = [...allIntakes];
-      } else {
-        filteredIntakes = allIntakes.filter(item => {
-          const name = (item.patient_name || '').toLowerCase();
-          const birth = (item.patient_birth || '').replace(/[^0-9]/g, '');
-          const searchClean = searchKeyword.replace(/[^0-9a-zA-Z가-힣]/g, '');
+      // 1단계: 상태(대기중/완료/전체) 필터링 (status가 null인 기존 환자도 대기중으로 정확히 포함)
+      let list = allIntakes.filter(item => {
+        const itemStatus = item.status || '대기중';
+        if (filter === '대기중') return itemStatus !== '완료';
+        if (filter === '완료') return itemStatus === '완료';
+        return true; // 'ALL'
+      });
+
+      // 2단계: 검색어(이름/생년월일) 필터링
+      if (searchKeyword) {
+        const searchClean = searchKeyword.replace(/[^0-9a-zA-Z가-힣]/g, '');
+        list = list.filter(item => {
+          const name = String(item.patient_name || '').toLowerCase();
+          const birth = String(item.patient_birth || '').replace(/[^0-9]/g, '');
 
           const nameMatch = name.includes(searchKeyword);
-          const birthMatch = birth.includes(searchClean);
+          const birthMatch = searchClean.length > 0 && birth.includes(searchClean);
           return nameMatch || birthMatch;
         });
       }
 
+      filteredIntakes = list;
       renderQueue();
     }
 
@@ -239,25 +247,26 @@
 
       container.innerHTML = filteredIntakes.map(item => {
         const isSelected = item.id === selectedId;
-        const time = new Date(item.created_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+        const time = item.created_at ? new Date(item.created_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }) : '';
         
         let rfBadge = '';
         if (item.rf_level === 'emergency_119') rfBadge = '<span class="px-1.5 py-0.5 rounded text-[10px] bg-rose-600 text-white font-bold">🚨 119응급</span>';
         else if (item.rf_level === 'sameday_hospital') rfBadge = '<span class="px-1.5 py-0.5 rounded text-[10px] bg-amber-500 text-white font-bold">⚠️ 당일내원</span>';
 
         const isExistingText = item.is_existing === 'existing' ? '단골' : '신규';
-        const statusClass = item.status === '완료' ? 'bg-slate-200 text-slate-600' : 'bg-emerald-100 text-emerald-800 font-bold';
+        const itemStatus = item.status || '대기중';
+        const statusClass = itemStatus === '완료' ? 'bg-slate-200 text-slate-600' : 'bg-emerald-100 text-emerald-800 font-bold';
         const photoCount = (item.photos && item.photos.length) ? item.photos.length : 0;
         const activeBg = isSelected ? 'bg-emerald-50/80 border-l-4 border-emerald-600' : 'hover:bg-slate-50';
 
         return `
           <div onclick="selectIntakeById('${item.id}')" class="p-3.5 cursor-pointer transition text-left relative group ${activeBg}">
             <div class="flex items-center justify-between mb-1">
-              <div class="flex items-center gap-1.5">
+              <div class="flex items-center gap-1.5 truncate">
                 <span class="font-bold text-sm text-slate-900">${item.patient_name || '이름 없음'}</span>
                 <span class="text-xs text-slate-500">(${item.patient_gender \vert{}\vert{} '미선택'}, ${item.patient_birth || '생일미입력'})</span>
               </div>
-              <div class="flex items-center gap-1.5">
+              <div class="flex items-center gap-1.5 flex-shrink-0">
                 <span class="text-[11px] text-slate-400 font-mono">${time}</span>
                 <button type="button" onclick="deleteIntake('${item.id}', event)" class="text-slate-300 hover:text-rose-600 p-1 text-xs rounded transition" title="접수 환자 삭제">
                   🗑️
@@ -267,7 +276,7 @@
             <div class="flex items-center gap-1.5 mb-1.5 flex-wrap">
               ${rfBadge}
               <span class="text-[11px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-medium">${isExistingText}</span>
-              <span class="text-[11px] px-1.5 py-0.5 rounded ${statusClass}">${item.status || '대기중'}</span>
+              <span class="text-[11px] px-1.5 py-0.5 rounded ${statusClass}">${itemStatus}</span>
               <span class="text-[11px] text-slate-400">사진 ${photoCount}장</span>
             </div>
             <p class="text-xs text-rose-600 font-medium truncate">★ ${item.top_symptom || '불편 증상 없음'}</p>
@@ -311,7 +320,7 @@
     }
 
     // ========================================================
-    // 4. [신규] 접수 환자 삭제(Delete) 기능
+    // 4. 접수 환자 삭제 기능
     // ========================================================
     async function deleteIntake(id, event) {
       if (event) event.stopPropagation();
@@ -339,7 +348,7 @@
     }
 
     // ========================================================
-    // 5. 고속 이미지 캔버스 압축 (OCR 인식 최적화)
+    // 5. 이미지 캔버스 리사이징 (OCR 인식 최적화)
     // ========================================================
     function compressImageForAi(dataUrl, maxDim = 1600) {
       return new Promise((resolve) => {
@@ -369,7 +378,7 @@
     }
 
     // ========================================================
-    // 6. 약봉투 / 처방전 전용 고정밀 OCR 엔진 (약품명/용법/1회투여량 분리)
+    // 6. 약봉투 / 처방전 OCR 엔진 (약품명/용법/1회투여량 분리)
     // ========================================================
     async function runPrescriptionOcr() {
       if (!currentPhotos || currentPhotos.length === 0) {
@@ -475,7 +484,7 @@
         });
 
         renderMedChips();
-        alert(`약봉투/처방전에서 ${addedCount}개의 의약품(용법/1회투여량 포함)을 성공적으로 추출하여 등록했습니다.`);
+        alert(`약봉투/처방전에서 ${addedCount}개의 의약품을 성공적으로 추출하여 등록했습니다.`);
 
       } catch (err) {
         console.error("약봉투 OCR 실패:", err);
@@ -528,7 +537,6 @@
       }).join('');
     }
 
-    // 약품명 + 1회투여량 + 용법 수동 추가
     function addManualMedChip() {
       const nameInput = document.getElementById('medNameInput');
       const doseInput = document.getElementById('medDoseInput');
@@ -608,7 +616,7 @@
       card.classList.remove('hidden');
 
       currentPhotos = item.photos || [];
-      const dateStr = new Date(item.created_at).toLocaleString('ko-KR');
+      const dateStr = item.created_at ? new Date(item.created_at).toLocaleString('ko-KR') : '';
 
       let rfHtml = '';
       if (item.rf_level !== 'none') {
@@ -702,15 +710,16 @@
 
       const existingBadgeClass = item.is_existing === 'existing' ? 'text-emerald-700' : 'text-blue-700';
       const existingBadgeText = item.is_existing === 'existing' ? '단골 환자' : '신규 환자';
-      const btnStatusClass = item.status === '완료' ? 'bg-slate-100 text-slate-700' : 'bg-emerald-600 text-white';
-      const btnStatusText = item.status === '완료' ? '대기중으로 변경' : '✓ 검토 완료 처리';
+      const itemStatus = item.status || '대기중';
+      const btnStatusClass = itemStatus === '완료' ? 'bg-slate-100 text-slate-700' : 'bg-emerald-600 text-white';
+      const btnStatusText = itemStatus === '완료' ? '대기중으로 변경' : '✓ 검토 완료 처리';
 
       card.innerHTML = `
         <div class="mobile-only pb-2 border-b border-slate-100 flex items-center justify-between no-print">
           <button type="button" onclick="backToQueue()" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition">
             <span>← 접수 목록으로</span>
           </button>
-          <span class="text-xs font-mono text-slate-400 font-semibold">${item.status || '대기중'}</span>
+          <span class="text-xs font-mono text-slate-400 font-semibold">${itemStatus}</span>
         </div>
 
         <div class="flex flex-col sm:flex-row sm:items-start justify-between border-b pb-4 border-slate-200 gap-3">
@@ -723,7 +732,7 @@
             <p class="text-[11px] sm:text-xs text-slate-400 font-mono">접수일시: ${dateStr}</p>
           </div>
           <div class="flex items-center gap-2 no-print flex-shrink-0 flex-wrap">
-            <button type="button" onclick="toggleStatus('${item.id}', '${item.status || '대기중'}')" class="px-3.5 py-1.5 text-xs font-bold rounded-lg border ${btnStatusClass} transition">
+            <button type="button" onclick="toggleStatus('${item.id}', '${itemStatus}')" class="px-3.5 py-1.5 text-xs font-bold rounded-lg border ${btnStatusClass} transition">
               ${btnStatusText}
             </button>
             <button type="button" onclick="window.print()" class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-800 text-white hover:bg-slate-700">인쇄</button>
@@ -887,7 +896,6 @@
 
       const selectedPatient = allIntakes.find(i => i.id === selectedId);
 
-      // 확정 약물 목록(약품명, 1회투여량, 용법)을 포함하여 sessionStorage에 전달
       sessionStorage.setItem('selected_patient_intake', JSON.stringify({
         ...selectedPatient,
         confirmed_meds: currentConfirmedMeds
@@ -908,7 +916,7 @@
     }
 
     document.getElementById('btnRefresh').addEventListener('click', fetchIntakeList);
-    document.getElementById('statusFilter').addEventListener('change', fetchIntakeList);
+    document.getElementById('statusFilter').addEventListener('change', applyFilterAndSearch);
     document.getElementById('btnCloseLightbox').addEventListener('click', closeImageLightbox);
     document.getElementById('btnConfirmCloseLightbox').addEventListener('click', closeImageLightbox);
     document.getElementById('imageLightboxModal').addEventListener('click', closeImageLightbox);
@@ -929,12 +937,10 @@
     window.runPrescriptionOcr = runPrescriptionOcr;
     window.resetGeminiApiKey = resetGeminiApiKey;
 
-    // 실시간 웹소켓 구독
+    // 실시간 웹소켓 구독 (추가/수정/삭제 이벤트 전체 감지)
     supabaseClient
       .channel('realtime-intakes')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'intakes' }, () => {
-        const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
-        audio.play().catch(() => {});
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'intakes' }, () => {
         fetchIntakeList();
       })
       .subscribe();
