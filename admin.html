@@ -4,7 +4,6 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>약사 전용 만성질환 정밀 문진 접수 대장</title>
-  <!-- Tailwind CSS & Supabase SDK -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <style>
@@ -12,8 +11,6 @@
       font-family: -apple-system, BlinkMacSystemFont, "Pretendard", "Segoe UI", Roboto, sans-serif;
       -webkit-tap-highlight-color: transparent;
     }
-
-    /* 1. 모바일 (768px 미만): 1열 전환 */
     @media (max-width: 767px) {
       #queueAside { display: flex; width: 100%; }
       #detailMain { display: none; width: 100%; }
@@ -21,16 +18,12 @@
       body.show-detail #detailMain { display: flex !important; }
       .desktop-only { display: none !important; }
     }
-
-    /* 2. PC/태블릿 (768px 이상): 좌우 2분할 고정 */
     @media (min-width: 768px) {
       #queueAside { display: flex !important; width: 22rem; flex-shrink: 0; }
       #detailMain { display: flex !important; flex: 1; }
       .mobile-only { display: none !important; }
     }
-
     .custom-scroll { -webkit-overflow-scrolling: touch; }
-
     @media print {
       .no-print { display: none !important; }
       body { background: white !important; overflow: visible !important; height: auto !important; }
@@ -48,18 +41,21 @@
       <h1 class="font-bold text-sm sm:text-base tracking-tight truncate">만성질환 문진 접수 대장</h1>
       <span class="hidden sm:inline-flex text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 items-center gap-1 flex-shrink-0">
         <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-        실시간 감시
+        보안 스토리지 연동
       </span>
     </div>
     <div class="flex items-center gap-2 flex-shrink-0">
       <span id="queueCounter" class="text-[11px] sm:text-xs text-slate-400 font-mono">대기: 0건</span>
+      <button type="button" onclick="resetGeminiApiKey()" class="px-2 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition border border-slate-700 font-medium" title="API 키 변경/재설정">
+        🔑 API 키 설정
+      </button>
       <button type="button" id="btnRefresh" class="px-2.5 py-1 text-xs bg-slate-800 hover:bg-slate-700 rounded-lg transition border border-slate-700 font-medium">
         새로고침
       </button>
     </div>
   </header>
 
-  <!-- 메인 레이아웃 -->
+  <!-- 메인 프레임워크 -->
   <div class="flex-1 flex overflow-hidden relative">
     
     <!-- 좌측 대기열 목록 -->
@@ -72,7 +68,6 @@
           <option value="완료">상담 완료</option>
         </select>
       </div>
-
       <div id="patientQueue" class="flex-1 overflow-y-auto divide-y divide-slate-100 custom-scroll pb-24"></div>
     </aside>
 
@@ -90,33 +85,64 @@
 
   </div>
 
-  <!-- 이미지 라이트박스 모달 -->
+  <!-- 이미지 고화질 라이트박스 모달 -->
   <div id="imageLightboxModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-xs z-50 hidden flex items-center justify-center p-3 no-print">
-    <div class="bg-white rounded-2xl max-w-2xl w-full p-4 shadow-2xl space-y-3 border border-slate-200" onclick="event.stopPropagation()">
+    <div class="bg-white rounded-2xl max-w-3xl w-full p-4 shadow-2xl space-y-3 border border-slate-200" onclick="event.stopPropagation()">
       <div class="flex items-center justify-between pb-2 border-b border-slate-100">
         <h4 id="lightboxTitle" class="font-bold text-slate-900 text-sm truncate">사진 상세 미리보기</h4>
         <button type="button" id="btnCloseLightbox" class="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 flex items-center justify-center font-bold text-base transition">✕</button>
       </div>
-      <div class="bg-slate-900/5 rounded-xl p-2 flex items-center justify-center min-h-[260px] max-h-[70vh] overflow-hidden">
-        <img id="lightboxImg" src="" alt="사진 원본" class="max-h-[65vh] w-auto max-w-full rounded-lg object-contain">
+      <div class="bg-slate-900/5 rounded-xl p-2 flex items-center justify-center min-h-[300px] max-h-[75vh] overflow-hidden">
+        <img id="lightboxImg" src="" alt="사진 원본" class="max-h-[70vh] w-auto max-w-full rounded-lg object-contain">
       </div>
-      <div class="flex justify-end pt-1">
+      <div class="flex justify-between items-center pt-1 text-xs text-slate-500">
+        <span>💡 마우스 휠이나 제스처로 확대해 보실 수 있습니다.</span>
         <button type="button" id="btnConfirmCloseLightbox" class="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-xs font-semibold">닫기</button>
       </div>
     </div>
   </div>
 
   <script>
+    // ========================================================
     // 1. Supabase 연동 설정
+    // ========================================================
     const SUPABASE_URL = "https://qyvrlojwagbjjmcaaffe.supabase.co";
     const SUPABASE_ANON_KEY = "sb_publishable_Sk7CTdSeRnBTYeK-9Key_g_msHrna8I";
     const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+    // ========================================================
+    // 2. 보안 스토리지 기반 Gemini API 키 관리 (GitHub 노출 차단)
+    // ========================================================
+    function getGeminiApiKey() {
+      let key = localStorage.getItem('MY_GEMINI_API_KEY');
+      if (!key || !key.trim()) {
+        key = prompt("Gemini API 키를 입력해 주세요.\n(최초 1회만 입력하면 이 브라우저에 안전하게 저장되며, GitHub에 노출되지 않습니다):");
+        if (key && key.trim()) {
+          key = key.trim();
+          localStorage.setItem('MY_GEMINI_API_KEY', key);
+        }
+      }
+      return key ? key.trim() : null;
+    }
+
+    function resetGeminiApiKey() {
+      const current = localStorage.getItem('MY_GEMINI_API_KEY') || '';
+      const newKey = prompt("새로운 Gemini API 키를 입력하세요 (취소 시 기존 키 유지):", current);
+      if (newKey !== null && newKey.trim()) {
+        localStorage.setItem('MY_GEMINI_API_KEY', newKey.trim());
+        alert("API 키가 성공적으로 변경 및 저장되었습니다.");
+      }
+    }
+
     let allIntakes = [];
     let selectedIndex = -1;
     let currentPhotos = [];
+    let selectedPhotoIndex = 0; // OCR 분석용 단일 선택 인덱스
+    let currentConfirmedMeds = [];
 
-    // 2. 대기 목록 데이터 로드 함수
+    // ========================================================
+    // 3. 대기 목록 데이터 로드 함수
+    // ========================================================
     async function fetchIntakeList() {
       const filterEl = document.getElementById('statusFilter');
       const filter = filterEl ? filterEl.value : 'ALL';
@@ -136,7 +162,7 @@
         const pendingCount = allIntakes.filter(i => i.status === '대기중').length;
         const counterEl = document.getElementById('queueCounter');
         if (counterEl) {
-          counterEl.innerText = `대기: ${pendingCount}건 | 총 ${allIntakes.length}건`;
+          counterEl.innerText = `대기: ${pendingCount}건 \vert{} 총 ${allIntakes.length}건`;
         }
 
         if (selectedIndex >= 0 && selectedIndex < allIntakes.length) {
@@ -147,7 +173,6 @@
       }
     }
 
-    // 3. 목록 렌더링
     function renderQueue() {
       const container = document.getElementById('patientQueue');
       if (!container) return;
@@ -191,11 +216,25 @@
       }).join('');
     }
 
-    // 4. 환자 선택 핸들러 (인덱스 기반)
     function selectIntake(idx) {
       selectedIndex = idx;
-      renderQueue();
+      currentConfirmedMeds = [];
+      selectedPhotoIndex = 0;
       const item = allIntakes[idx];
+      currentPhotos = (item && item.photos) ? item.photos : [];
+
+      if (item && item.direct_meds && Array.isArray(item.direct_meds) && item.direct_meds.length > 0) {
+        currentConfirmedMeds = item.direct_meds
+          .filter(m => m.name && m.name.trim())
+          .map(m => ({
+            name: m.name.trim(),
+            dose: (m.dose || '').trim(),
+            timing: (m.note || '처방대로').trim(),
+            source: '환자 직접 입력'
+          }));
+      }
+
+      renderQueue();
       if (item) {
         renderDetail(item);
         document.body.classList.add('show-detail');
@@ -204,40 +243,272 @@
       }
     }
 
-    // 5. 모바일 목록 복귀
     function backToQueue() {
       selectedIndex = -1;
+      currentConfirmedMeds = [];
       renderQueue();
       document.body.classList.remove('show-detail');
     }
 
-    // 6. 이미지 라이트박스 열기
-    function openLightboxPhoto(photoIdx) {
-      const p = currentPhotos[photoIdx];
-      if (!p) return;
-      document.getElementById('lightboxImg').src = p.dataUrl;
-      document.getElementById('lightboxTitle').innerText = p.name || '사진 상세 미리보기';
-      document.getElementById('imageLightboxModal').classList.remove('hidden');
+    // ========================================================
+    // 4. 고속 이미지 캔버스 압축 (OCR 인식 최적화)
+    // ========================================================
+    function compressImageForAi(dataUrl, maxDim = 1600) {
+      return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          let w = img.width;
+          let h = img.height;
+          if (w > maxDim || h > maxDim) {
+            if (w > h) {
+              h = Math.round((h * maxDim) / w);
+              w = maxDim;
+            } else {
+              w = Math.round((w * maxDim) / h);
+              h = maxDim;
+            }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, w, h);
+          resolve(canvas.toDataURL('image/jpeg', 0.88));
+        };
+        img.onerror = () => resolve(dataUrl);
+        img.src = dataUrl;
+      });
     }
 
-    function closeImageLightbox() {
-      document.getElementById('imageLightboxModal').classList.add('hidden');
-      document.getElementById('lightboxImg').src = '';
-    }
+    // ========================================================
+    // 5. 약봉투 / 처방전 전용 고정밀 OCR 엔진
+    // ========================================================
+    async function runPrescriptionOcr() {
+      if (!currentPhotos || currentPhotos.length === 0) {
+        alert("첨부된 사진이 없습니다.");
+        return;
+      }
 
-    // 7. 상태 토글
-    async function toggleStatus(id, currentStatus) {
-      const newStatus = currentStatus === '완료' ? '대기중' : '완료';
+      const apiKey = getGeminiApiKey();
+      if (!apiKey) {
+        alert("API 키가 설정되지 않아 분석을 진행할 수 없습니다.");
+        return;
+      }
+
+      const targetPhoto = currentPhotos[selectedPhotoIndex];
+      if (!targetPhoto || !targetPhoto.dataUrl) {
+        alert("분석할 사진을 선택해 주세요.");
+        return;
+      }
+
+      const spinner = document.getElementById('ocrLoadingSpinner');
+      const btn = document.getElementById('btnRunOcr');
+      spinner.classList.remove('hidden');
+      btn.disabled = true;
+
       try {
-        const res = await supabaseClient.from('intakes').update({ status: newStatus }).eq('id', id);
-        if (res.error) throw res.error;
-        fetchIntakeList();
+        const compressedDataUrl = await compressImageForAi(targetPhoto.dataUrl);
+        const base64Data = compressedDataUrl.split(',')[1];
+
+        const prompt = `
+당신은 대한민국 병원 및 약국의 문서 판독 전문 수석약사입니다.
+제공된 이미지(조제 약봉투, 처방전, 복약안내문, 조제내역 영수증 등)에 인쇄된 텍스트를 정밀 분석하여 의약품 목록을 추출하세요.
+
+[OCR 추출 가이드]
+1. 활자로 인쇄된 모든 조제 의약품명(상품명 및 성분명)을 정확히 읽으세요.
+2. 각 약품의 용량(예: 5mg, 100mg)과 1일 복용법/시기(아침, 점심, 저녁, 자기전, 식후 30분 등)가 적혀 있다면 함께 분리하세요.
+3. 알약 형태를 억지로 추론하지 말고, 문서에 적힌 "실제 글자"만을 100% 신뢰하여 추출하세요.
+
+반드시 마크다운 따옴표(\`\`\`json) 없이 순수 JSON 배열만 출력하세요:
+[
+  {
+    "name": "약품명 (또는 상품명)",
+    "dose": "함량/용량 (없으면 빈문자열)",
+    "timing": "복약 시기/용법 (예: 아침 식후, 자기전 등)"
+  }
+]`;
+
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${apiKey}`;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 35000);
+
+        const response = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({
+            contents: [{
+              parts: [
+                { text: prompt },
+                {
+                  inlineData: {
+                    mimeType: "image/jpeg",
+                    data: base64Data
+                  }
+                }
+              ]
+            }]
+          })
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          const errJson = await response.json().catch(() => ({}));
+          throw new Error(errJson.error?.message || `HTTP ${response.status}`);
+        }
+
+        const resultData = await response.json();
+        const rawText = resultData.candidates?.[0]?.content?.parts?.[0]?.text?.replace(/```json|```/g, '')?.trim();
+        if (!rawText) throw new Error("문서에서 텍스트를 읽어오지 못했습니다.");
+
+        const parsedMeds = JSON.parse(rawText);
+
+        if (!Array.isArray(parsedMeds) || parsedMeds.length === 0) {
+          alert("약봉투/처방전 활자에서 약품명을 찾지 못했습니다. 사진이 선명한지 확인해 주세요.");
+          return;
+        }
+
+        let addedCount = 0;
+        parsedMeds.forEach(m => {
+          if (m.name && m.name.trim()) {
+            const trimmedName = m.name.trim();
+            const exists = currentConfirmedMeds.some(cur => cur.name === trimmedName);
+            if (!exists) {
+              currentConfirmedMeds.push({
+                name: trimmedName,
+                dose: (m.dose || '').trim(),
+                timing: (m.timing || '처방대로').trim(),
+                source: '약봉투/처방전 OCR'
+              });
+              addedCount++;
+            }
+          }
+        });
+
+        renderMedChips();
+        alert(`약봉투/처방전에서 ${addedCount}개의 의약품을 성공적으로 추출하여 등록했습니다.`);
+
       } catch (err) {
-        alert("상태 변경 실패: " + err.message);
+        console.error("약봉투 OCR 실패:", err);
+        alert("OCR 판독 알림: " + err.message);
+      } finally {
+        spinner.classList.add('hidden');
+        btn.disabled = false;
       }
     }
 
-    // 8. 상세 화면 렌더링
+    // ========================================================
+    // 6. 확정 약물 관리 로직
+    // ========================================================
+    function renderMedChips() {
+      const container = document.getElementById('confirmedMedsList');
+      const countBadge = document.getElementById('confirmedMedCountBadge');
+      if (!container) return;
+
+      if (countBadge) {
+        countBadge.innerText = `${currentConfirmedMeds.length}개 확정됨`;
+      }
+
+      if (currentConfirmedMeds.length === 0) {
+        container.innerHTML = `
+          <div class="py-5 text-center text-slate-400 text-xs border border-dashed border-slate-200 rounded-xl bg-slate-50/50">
+            등록된 약품이 없습니다.<br>
+            위의 <strong>[📄 약봉투/처방전 텍스트 자동 읽기]</strong>를 누르거나, 아래 입력창에 직접 입력해 주세요.
+          </div>
+        `;
+        return;
+      }
+
+      container.innerHTML = currentConfirmedMeds.map((med, idx) => {
+        return `
+          <div class="flex items-center justify-between gap-2 p-2.5 bg-white border border-slate-200 rounded-xl shadow-2xs">
+            <div class="flex items-center gap-2 flex-1 min-w-0">
+              <span class="w-5 h-5 rounded-full bg-emerald-100 text-emerald-800 flex items-center justify-center text-xs font-bold flex-shrink-0">${idx + 1}</span>
+              <div class="truncate">
+                <span class="font-bold text-slate-900 text-xs sm:text-sm">${med.name}</span>
+                ${med.dose ? `<span class="text-xs text-slate-500 font-medium ml-1">(${med.dose})</span>` : ''}
+                ${med.source ? `<span class="text-[10px] text-slate-400 block font-normal">${med.source}</span>` : ''}
+              </div>
+            </div>
+            <div class="flex items-center gap-2 flex-shrink-0">
+              <span class="text-[11px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-medium">${med.timing || '처방대로'}</span>
+              <button type="button" onclick="deleteMedChip(${idx})" class="text-slate-400 hover:text-rose-600 p-1 font-bold text-base transition" title="삭제">×</button>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function addManualMedChip() {
+      const nameInput = document.getElementById('medNameInput');
+      const timingSelect = document.getElementById('medTimingSelect');
+      
+      const name = nameInput.value.trim();
+      const timing = timingSelect.value;
+
+      if (!name) {
+        alert("약품명을 입력해 주세요.");
+        nameInput.focus();
+        return;
+      }
+
+      currentConfirmedMeds.push({
+        name: name,
+        dose: '',
+        timing: timing,
+        source: '약사 직접 입력'
+      });
+
+      nameInput.value = '';
+      nameInput.focus();
+      renderMedChips();
+    }
+
+    function handleMedInputKeypress(e) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        addManualMedChip();
+      }
+    }
+
+    function deleteMedChip(idx) {
+      currentConfirmedMeds.splice(idx, 1);
+      renderMedChips();
+    }
+
+    function importDirectMeds() {
+      if (selectedIndex < 0 || !allIntakes[selectedIndex]) return;
+      const item = allIntakes[selectedIndex];
+      if (!item.direct_meds || item.direct_meds.length === 0) {
+        alert("환자가 직접 입력한 약물 데이터가 없습니다.");
+        return;
+      }
+
+      let count = 0;
+      item.direct_meds.forEach(m => {
+        if (m.name && m.name.trim()) {
+          const trimmed = m.name.trim();
+          const exists = currentConfirmedMeds.some(cur => cur.name === trimmed);
+          if (!exists) {
+            currentConfirmedMeds.push({
+              name: trimmed,
+              dose: (m.dose || '').trim(),
+              timing: (m.note || '처방대로').trim(),
+              source: '환자 직접 입력'
+            });
+            count++;
+          }
+        }
+      });
+
+      renderMedChips();
+      alert(`${count}개의 환자 입력 약물을 가져왔습니다.`);
+    }
+
+    // ========================================================
+    // 7. 상세 화면 렌더링
+    // ========================================================
     function renderDetail(item) {
       document.getElementById('emptyGuide').classList.add('hidden');
       const card = document.getElementById('detailCard');
@@ -246,7 +517,6 @@
       currentPhotos = item.photos || [];
       const dateStr = new Date(item.created_at).toLocaleString('ko-KR');
 
-      // 긴급 위험 신호 배너
       let rfHtml = '';
       if (item.rf_level !== 'none') {
         const rfColor = item.rf_level === 'emergency_119' ? 'bg-rose-50 border-rose-300 text-rose-950' : 'bg-amber-50 border-amber-300 text-amber-950';
@@ -261,30 +531,46 @@
         `;
       }
 
-      // 사진 갤러리
-      let photosHtml = '<div class="p-3 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-400 text-center">첨부된 사진이 없습니다. (단골 전산 조회 대상 또는 미등록)</div>';
+      let photosHtml = '<div class="p-4 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-400 text-center">첨부된 사진이 없습니다. (처방전 또는 약봉투 미등록)</div>';
       if (currentPhotos.length > 0) {
         photosHtml = `
           <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
-            ${currentPhotos.map((p, pIdx) => `
-              <div class="border border-slate-200 rounded-xl overflow-hidden bg-slate-50 p-1 cursor-pointer hover:border-emerald-500 transition group" onclick="openLightboxPhoto(${pIdx})">
-                <img src="${p.dataUrl}" alt="사진" class="w-full h-28 sm:h-32 object-cover rounded-lg group-hover:opacity-90">
-                <div class="flex items-center justify-between mt-1 px-1 text-[11px]">
-                  <span class="text-slate-700 truncate font-medium">${p.name || '사진'}</span>
-                  <span class="text-[10px] bg-slate-200 text-slate-600 px-1 rounded">${p.category || '사진'}</span>
+            ${currentPhotos.map((p, pIdx) => {
+              const isSelected = pIdx === selectedPhotoIndex;
+              const borderStyle = isSelected ? 'ring-2 ring-indigo-500 bg-indigo-50/40' : 'border-slate-200 bg-white opacity-80';
+              return `
+                <div class="border rounded-xl overflow-hidden p-2 transition cursor-pointer group relative ${borderStyle}" onclick="selectOcrPhoto(${pIdx})">
+                  <div class="flex items-center justify-between mb-1.5">
+                    <label class="inline-flex items-center gap-1 text-[11px] font-bold text-slate-700 cursor-pointer">
+                      <input type="radio" name="ocrPhotoRadio" ${isSelected ? 'checked' : ''} class="w-3.5 h-3.5 text-indigo-600">
+                      <span>OCR 대상</span>
+                    </label>
+                    <button type="button" onclick="openLightboxPhoto(${pIdx}, event)" class="p-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-semibold" title="사진 확대">
+                      🔍 확대
+                    </button>
+                  </div>
+                  <img src="${p.dataUrl}" alt="사진" class="w-full h-32 sm:h-36 object-cover rounded-lg group-hover:opacity-95">
+                  <div class="flex items-center justify-between mt-1.5 px-0.5 text-[11px]">
+                    <span class="text-slate-800 truncate font-bold">${p.name || '사진 ' + (pIdx + 1)}</span>
+                    <span class="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">${p.category || '첨부'}</span>
+                  </div>
                 </div>
-              </div>
-            `).join('')}
+              `;
+            }).join('')}
           </div>
         `;
       }
 
-      // 직접 입력 표
       let directMedsHtml = '';
       if (item.direct_meds && item.direct_meds.length > 0) {
         directMedsHtml = `
-          <div class="border border-slate-200 rounded-xl p-3 bg-white space-y-2 text-xs overflow-x-auto">
-            <h3 class="font-bold text-xs sm:text-sm text-slate-900">환자 직접 표 입력 목록</h3>
+          <div class="border border-slate-200 rounded-xl p-3.5 bg-white space-y-2 text-xs overflow-x-auto">
+            <div class="flex items-center justify-between border-b pb-1.5 border-slate-100">
+              <h3 class="font-bold text-slate-900">환자가 직접 표에 적은 복용 약물</h3>
+              <button type="button" onclick="importDirectMeds()" class="text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-2 py-1 rounded text-[11px] font-bold transition">
+                + 확정 목록으로 가져오기
+              </button>
+            </div>
             <table class="w-full text-left border-collapse min-w-[280px]">
               <thead><tr class="border-b text-slate-500 text-[11px]"><th class="pb-1">약품명</th><th class="pb-1">용량</th><th class="pb-1">복용법/메모</th></tr></thead>
               <tbody class="divide-y divide-slate-100">
@@ -301,18 +587,16 @@
         `;
       }
 
-      // 복용법 메모
       let dosageMemoHtml = '';
       if (item.dosage_memo) {
         dosageMemoHtml = `
-          <div class="bg-amber-50 p-3 rounded-xl border border-amber-200 text-xs">
-            <span class="font-bold text-amber-900 block mb-1">💊 환자가 실제 복용 중인 방법:</span>
+          <div class="bg-amber-50 p-3.5 rounded-xl border border-amber-200 text-xs">
+            <span class="font-bold text-amber-900 block mb-1">💊 환자가 실제 복용 중인 방법 및 메모:</span>
             <p class="text-slate-800 whitespace-pre-wrap leading-relaxed">${item.dosage_memo}</p>
           </div>
         `;
       }
 
-      // 임의 중단 세부
       let skippedSubHtml = '';
       if (item.has_skipped === 'yes') {
         const skippedTypesText = (item.skipped_types && item.skipped_types.length) ? item.skipped_types.join(', ') : '미입력';
@@ -329,7 +613,6 @@
       const btnStatusText = item.status === '완료' ? '대기중으로 변경' : '✓ 검토 완료 처리';
 
       card.innerHTML = `
-        <!-- 모바일 전용 뒤로가기 -->
         <div class="mobile-only pb-2 border-b border-slate-100 flex items-center justify-between no-print">
           <button type="button" onclick="backToQueue()" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition">
             <span>← 접수 목록으로</span>
@@ -337,7 +620,6 @@
           <span class="text-xs font-mono text-slate-400 font-semibold">${item.status || '대기중'}</span>
         </div>
 
-        <!-- 헤더 정보 -->
         <div class="flex flex-col sm:flex-row sm:items-start justify-between border-b pb-4 border-slate-200 gap-3">
           <div>
             <div class="flex items-center gap-2 mb-1 flex-wrap">
@@ -364,9 +646,72 @@
           <div><span class="text-slate-400 block mb-0.5 text-[11px]">약물 알레르기</span><strong class="text-rose-600">${item.allergy || '없음'}</strong></div>
         </div>
 
+        <!-- 📸 첨부 사진 목록 및 약봉투 OCR 패널 -->
         <div>
-          <h3 class="text-xs sm:text-sm font-bold text-slate-900 mb-2">첨부된 사진 목록 (${currentPhotos.length}장)</h3>
+          <div class="flex items-center justify-between mb-2">
+            <h3 class="text-xs sm:text-sm font-bold text-slate-900">
+              첨부 사진 목록 (${currentPhotos.length}장)
+            </h3>
+            <span class="text-[11px] text-slate-500">약봉투나 처방전 사진을 클릭하여 선택하세요.</span>
+          </div>
           ${photosHtml}
+        </div>
+
+        <!-- 📄 약봉투/처방전 텍스트 자동 인식 액션 바 -->
+        <div class="p-3 bg-indigo-50/60 border border-indigo-200 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-2.5 text-xs">
+          <div class="flex items-center gap-2">
+            <span class="w-6 h-6 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-bold text-xs">📄</span>
+            <div>
+              <p class="font-bold text-indigo-950 text-xs sm:text-sm">약봉투 또는 처방전 텍스트 자동 읽기 (OCR)</p>
+              <p class="text-slate-500 text-[11px]">선택된 사진의 활자(약품명·성분명·용법)를 AI가 2초 만에 읽어 등록합니다.</p>
+            </div>
+          </div>
+          <button type="button" id="btnRunOcr" onclick="runPrescriptionOcr()" class="w-full sm:w-auto px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg text-xs transition shadow-xs whitespace-nowrap flex items-center justify-center gap-1.5">
+            <span>⚡ 선택한 사진 텍스트 자동 추출</span>
+          </button>
+        </div>
+
+        <div id="ocrLoadingSpinner" class="hidden py-3 text-center text-indigo-600 font-semibold space-y-2">
+          <div class="inline-block animate-spin rounded-full h-5 w-5 border-2 border-indigo-600 border-t-transparent"></div>
+          <p class="text-xs">약봉투 및 처방전 활자를 읽어내는 중입니다 (약 2초)...</p>
+        </div>
+
+        <!-- 💊 복용 약물 최종 확정 패널 -->
+        <div class="border border-emerald-200 rounded-xl p-4 bg-emerald-50/30 space-y-3 text-xs">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-1.5 font-bold text-emerald-950 text-sm">
+              <span>💊 복용 약물 목록 (회신서 작성용)</span>
+              <span id="confirmedMedCountBadge" class="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold">0개 확정됨</span>
+            </div>
+            <button type="button" onclick="importDirectMeds()" class="text-xs text-slate-600 hover:text-emerald-700 bg-white border border-slate-200 px-2 py-1 rounded-lg transition font-medium">
+              환자 입력 약물 가져오기
+            </button>
+          </div>
+
+          <p class="text-slate-500 text-[11px]">
+            약봉투 OCR 결과와 약사 확인을 마친 약물 목록입니다. 잘못 인식된 항목은 '×'로 지우거나 직접 추가할 수 있습니다.
+          </p>
+
+          <!-- 확정 약물 카드 목록 -->
+          <div id="confirmedMedsList" class="space-y-1.5 pt-1"></div>
+
+          <!-- 약품 수동 추가 바 -->
+          <div class="pt-2 border-t border-emerald-100 flex flex-col sm:flex-row gap-2">
+            <input type="text" id="medNameInput" onkeypress="handleMedInputKeypress(event)" placeholder="약품명 입력 (예: 노바스크정 5mg, 가스모틴정) 후 Enter" class="flex-1 p-2.5 border border-slate-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500">
+            <div class="flex gap-2">
+              <select id="medTimingSelect" class="p-2 border border-slate-300 rounded-lg text-xs bg-white focus:outline-none">
+                <option value="아침 식후">아침 식후</option>
+                <option value="저녁 식후">저녁 식후</option>
+                <option value="아침/저녁">아침/저녁</option>
+                <option value="자기전">자기전</option>
+                <option value="필요시">필요시</option>
+                <option value="처방대로" selected>처방대로</option>
+              </select>
+              <button type="button" onclick="addManualMedChip()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs transition shadow-2xs whitespace-nowrap">
+                + 추가
+              </button>
+            </div>
+          </div>
         </div>
 
         ${directMedsHtml}
@@ -395,57 +740,106 @@
           <div><span class="text-slate-400">복약 시간 규칙성:</span> <strong>${item.timing_habit || '미선택'}</strong></div>
         </div>
 
-        <!-- 8. 환자 최우선 핵심 질문 -->
         <div class="bg-emerald-50 p-3.5 rounded-xl border border-emerald-200 text-xs">
           <span class="font-bold text-emerald-900 block mb-1">💡 환자가 가장 궁금해하는 질문 (1-Pick):</span>
           <p class="text-emerald-950 font-bold text-sm leading-relaxed">${item.main_question || '미선택'}</p>
         </div>
 
-        <!-- [신규 추가] 회신서 작성 버튼 바 -->
+        <!-- 🚀 AI 복약 회신서 생성 버튼 -->
         <div class="pt-4 border-t border-slate-200 flex gap-2.5 no-print">
           <button type="button" onclick="openReplyEditor()" class="flex-1 py-3.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-sm transition flex items-center justify-center gap-2 text-sm sm:text-base">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
             </svg>
-            <span>이 환자 맞춤 복약 회신서 작성하기</span>
+            <span>확정된 약품으로 AI 복약지도 회신서 작성하기</span>
           </button>
         </div>
 
         <div class="h-16 sm:h-6"></div>
       `;
+
+      renderMedChips();
     }
 
-    // [신규 추가] 선택된 환자 문진 데이터를 세션에 담아 회신서 작성창 오픈
+    // ========================================================
+    // 8. 사진 선택 및 라이트박스 핸들러
+    // ========================================================
+    function selectOcrPhoto(idx) {
+      selectedPhotoIndex = idx;
+      if (selectedIndex >= 0 && allIntakes[selectedIndex]) {
+        renderDetail(allIntakes[selectedIndex]);
+      }
+    }
+
+    function openLightboxPhoto(photoIdx, event) {
+      if (event) event.stopPropagation();
+      const p = currentPhotos[photoIdx];
+      if (!p) return;
+      document.getElementById('lightboxImg').src = p.dataUrl;
+      document.getElementById('lightboxTitle').innerText = p.name || `사진 ${photoIdx + 1} 원본 미리보기`;
+      document.getElementById('imageLightboxModal').classList.remove('hidden');
+    }
+
+    function closeImageLightbox() {
+      document.getElementById('imageLightboxModal').classList.add('hidden');
+      document.getElementById('lightboxImg').src = '';
+    }
+
+    // ========================================================
+    // 9. 회신서(reply.html) 연동 핸들러
+    // ========================================================
     function openReplyEditor() {
       if (selectedIndex < 0 || !allIntakes[selectedIndex]) {
         alert("선택된 환자 데이터가 없습니다.");
         return;
       }
 
+      if (currentConfirmedMeds.length === 0) {
+        const proceed = confirm("등록된 복용 약물이 없습니다. 이대로 회신서 작성을 진행할까요?");
+        if (!proceed) return;
+      }
+
       const selectedPatient = allIntakes[selectedIndex];
-      
-      // 브라우저 세션 스토리지에 환자 데이터 전체 저장
-      sessionStorage.setItem('selected_patient_intake', JSON.stringify(selectedPatient));
-      
-      // 새 탭(또는 현재 탭)으로 회신서 페이지 열기
+
+      sessionStorage.setItem('selected_patient_intake', JSON.stringify({
+        ...selectedPatient,
+        confirmed_meds: currentConfirmedMeds
+      }));
+
       window.open('reply.html', '_blank');
     }
 
-    // 9. 이벤트 리스너 안전 바인딩
+    async function toggleStatus(id, currentStatus) {
+      const newStatus = currentStatus === '완료' ? '대기중' : '완료';
+      try {
+        const res = await supabaseClient.from('intakes').update({ status: newStatus }).eq('id', id);
+        if (res.error) throw res.error;
+        fetchIntakeList();
+      } catch (err) {
+        alert("상태 변경 실패: " + err.message);
+      }
+    }
+
     document.getElementById('btnRefresh').addEventListener('click', fetchIntakeList);
     document.getElementById('statusFilter').addEventListener('change', fetchIntakeList);
     document.getElementById('btnCloseLightbox').addEventListener('click', closeImageLightbox);
     document.getElementById('btnConfirmCloseLightbox').addEventListener('click', closeImageLightbox);
     document.getElementById('imageLightboxModal').addEventListener('click', closeImageLightbox);
 
-    // 10. 전역 함수 등록
     window.selectIntake = selectIntake;
     window.backToQueue = backToQueue;
+    window.selectOcrPhoto = selectOcrPhoto;
     window.openLightboxPhoto = openLightboxPhoto;
     window.toggleStatus = toggleStatus;
     window.openReplyEditor = openReplyEditor;
+    window.addManualMedChip = addManualMedChip;
+    window.deleteMedChip = deleteMedChip;
+    window.importDirectMeds = importDirectMeds;
+    window.handleMedInputKeypress = handleMedInputKeypress;
+    window.runPrescriptionOcr = runPrescriptionOcr;
+    window.resetGeminiApiKey = resetGeminiApiKey;
 
-    // 11. 실시간 웹소켓 구독
+    // 실시간 웹소켓 구독
     supabaseClient
       .channel('realtime-intakes')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'intakes' }, () => {
@@ -455,7 +849,6 @@
       })
       .subscribe();
 
-    // 초기 실행
     window.addEventListener('DOMContentLoaded', fetchIntakeList);
     fetchIntakeList();
   </script>
