@@ -41,7 +41,7 @@
       <h1 class="font-bold text-sm sm:text-base tracking-tight truncate">만성질환 문진 접수 대장</h1>
       <span class="hidden sm:inline-flex text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 items-center gap-1 flex-shrink-0">
         <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-        보안 스토리지 연동
+        실시간 감시 가동
       </span>
     </div>
     <div class="flex items-center gap-2 flex-shrink-0">
@@ -60,14 +60,24 @@
     
     <!-- 좌측 대기열 목록 -->
     <aside id="queueAside" class="bg-white border-r border-slate-200 flex flex-col flex-shrink-0 no-print h-full">
-      <div class="p-3 border-b border-slate-100 flex items-center justify-between bg-slate-50">
-        <span class="text-xs font-bold text-slate-700">접수 환자 목록</span>
-        <select id="statusFilter" class="text-xs border border-slate-300 rounded px-2 py-1 bg-white focus:outline-none">
-          <option value="ALL">전체 보기</option>
-          <option value="대기중" selected>대기중만 보기</option>
-          <option value="완료">상담 완료</option>
-        </select>
+      <!-- 상태 필터 & 실시간 환자 검색창 -->
+      <div class="p-3 border-b border-slate-100 bg-slate-50 space-y-2">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-bold text-slate-700">접수 환자 목록</span>
+          <select id="statusFilter" class="text-xs border border-slate-300 rounded px-2 py-1 bg-white focus:outline-none">
+            <option value="ALL">전체 보기</option>
+            <option value="대기중" selected>대기중만 보기</option>
+            <option value="완료">상담 완료</option>
+          </select>
+        </div>
+        <!-- 🔍 이름 / 생년월일 검색 입력창 -->
+        <div class="relative">
+          <input type="text" id="patientSearchInput" oninput="handlePatientSearch()" placeholder="환자명 또는 생년월일(6자리) 검색..." class="w-full text-xs pl-7 pr-7 py-1.5 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500 bg-white">
+          <span class="absolute left-2.5 top-1.5 text-slate-400 text-xs">🔍</span>
+          <button type="button" id="btnSearchClear" onclick="clearPatientSearch()" class="hidden absolute right-2 top-1.5 text-slate-400 hover:text-slate-600 text-xs font-bold w-4 h-4 rounded-full flex items-center justify-center">✕</button>
+        </div>
       </div>
+
       <div id="patientQueue" class="flex-1 overflow-y-auto divide-y divide-slate-100 custom-scroll pb-24"></div>
     </aside>
 
@@ -111,7 +121,7 @@
     const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
     // ========================================================
-    // 2. 보안 스토리지 기반 Gemini API 키 관리 (GitHub 노출 차단)
+    // 2. 보안 스토리지 기반 Gemini API 키 관리
     // ========================================================
     function getGeminiApiKey() {
       let key = localStorage.getItem('MY_GEMINI_API_KEY');
@@ -135,13 +145,14 @@
     }
 
     let allIntakes = [];
-    let selectedIndex = -1;
+    let filteredIntakes = []; // 검색 및 필터가 적용된 환자 목록
+    let selectedId = null;    // 현재 선택된 환자의 DB 고유 ID
     let currentPhotos = [];
-    let selectedPhotoIndex = 0; // OCR 분석용 단일 선택 인덱스
+    let selectedPhotoIndex = 0;
     let currentConfirmedMeds = [];
 
     // ========================================================
-    // 3. 대기 목록 데이터 로드 함수
+    // 3. 대기 목록 데이터 로드 및 검색 필터링
     // ========================================================
     async function fetchIntakeList() {
       const filterEl = document.getElementById('statusFilter');
@@ -157,7 +168,7 @@
         if (res.error) throw res.error;
 
         allIntakes = res.data || [];
-        renderQueue();
+        applyFilterAndSearch();
 
         const pendingCount = allIntakes.filter(i => i.status === '대기중').length;
         const counterEl = document.getElementById('queueCounter');
@@ -165,25 +176,69 @@
           counterEl.innerText = `대기: ${pendingCount}건 \vert{} 총 ${allIntakes.length}건`;
         }
 
-        if (selectedIndex >= 0 && selectedIndex < allIntakes.length) {
-          renderDetail(allIntakes[selectedIndex]);
+        // 현재 선택되어 있던 환자가 있으면 상세 화면 동기화
+        if (selectedId) {
+          const currentPatient = allIntakes.find(i => i.id === selectedId);
+          if (currentPatient) {
+            renderDetail(currentPatient);
+          } else {
+            backToQueue();
+          }
         }
       } catch (err) {
         console.error("데이터 조회 실패:", err);
       }
     }
 
+    function handlePatientSearch() {
+      const searchInput = document.getElementById('patientSearchInput');
+      const clearBtn = document.getElementById('btnSearchClear');
+      if (clearBtn) {
+        if (searchInput.value.trim().length > 0) clearBtn.classList.remove('hidden');
+        else clearBtn.classList.add('hidden');
+      }
+      applyFilterAndSearch();
+    }
+
+    function clearPatientSearch() {
+      const searchInput = document.getElementById('patientSearchInput');
+      const clearBtn = document.getElementById('btnSearchClear');
+      if (searchInput) searchInput.value = '';
+      if (clearBtn) clearBtn.classList.add('hidden');
+      applyFilterAndSearch();
+    }
+
+    function applyFilterAndSearch() {
+      const searchKeyword = (document.getElementById('patientSearchInput')?.value || '').trim().toLowerCase();
+
+      if (!searchKeyword) {
+        filteredIntakes = [...allIntakes];
+      } else {
+        filteredIntakes = allIntakes.filter(item => {
+          const name = (item.patient_name || '').toLowerCase();
+          const birth = (item.patient_birth || '').replace(/[^0-9]/g, '');
+          const searchClean = searchKeyword.replace(/[^0-9a-zA-Z가-힣]/g, '');
+
+          const nameMatch = name.includes(searchKeyword);
+          const birthMatch = birth.includes(searchClean);
+          return nameMatch || birthMatch;
+        });
+      }
+
+      renderQueue();
+    }
+
     function renderQueue() {
       const container = document.getElementById('patientQueue');
       if (!container) return;
 
-      if (allIntakes.length === 0) {
-        container.innerHTML = '<div class="p-8 text-center text-xs text-slate-400">접수된 문진표가 없습니다.</div>';
+      if (filteredIntakes.length === 0) {
+        container.innerHTML = '<div class="p-8 text-center text-xs text-slate-400">조건에 부합하는 접수 환자가 없습니다.</div>';
         return;
       }
 
-      container.innerHTML = allIntakes.map((item, idx) => {
-        const isSelected = idx === selectedIndex;
+      container.innerHTML = filteredIntakes.map(item => {
+        const isSelected = item.id === selectedId;
         const time = new Date(item.created_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
         
         let rfBadge = '';
@@ -196,13 +251,18 @@
         const activeBg = isSelected ? 'bg-emerald-50/80 border-l-4 border-emerald-600' : 'hover:bg-slate-50';
 
         return `
-          <div onclick="selectIntake(${idx})" class="p-3.5 cursor-pointer transition text-left ${activeBg}">
+          <div onclick="selectIntakeById('${item.id}')" class="p-3.5 cursor-pointer transition text-left relative group ${activeBg}">
             <div class="flex items-center justify-between mb-1">
               <div class="flex items-center gap-1.5">
                 <span class="font-bold text-sm text-slate-900">${item.patient_name || '이름 없음'}</span>
-                <span class="text-xs text-slate-500">(${item.patient_gender || '미선택'})</span>
+                <span class="text-xs text-slate-500">(${item.patient_gender \vert{}\vert{} '미선택'}, ${item.patient_birth || '생일미입력'})</span>
               </div>
-              <span class="text-[11px] text-slate-400 font-mono">${time}</span>
+              <div class="flex items-center gap-1.5">
+                <span class="text-[11px] text-slate-400 font-mono">${time}</span>
+                <button type="button" onclick="deleteIntake('${item.id}', event)" class="text-slate-300 hover:text-rose-600 p-1 text-xs rounded transition" title="접수 환자 삭제">
+                  🗑️
+                </button>
+              </div>
             </div>
             <div class="flex items-center gap-1.5 mb-1.5 flex-wrap">
               ${rfBadge}
@@ -216,11 +276,11 @@
       }).join('');
     }
 
-    function selectIntake(idx) {
-      selectedIndex = idx;
+    function selectIntakeById(id) {
+      selectedId = id;
       currentConfirmedMeds = [];
       selectedPhotoIndex = 0;
-      const item = allIntakes[idx];
+      const item = allIntakes.find(i => i.id === id);
       currentPhotos = (item && item.photos) ? item.photos : [];
 
       if (item && item.direct_meds && Array.isArray(item.direct_meds) && item.direct_meds.length > 0) {
@@ -228,7 +288,7 @@
           .filter(m => m.name && m.name.trim())
           .map(m => ({
             name: m.name.trim(),
-            dose: (m.dose || '').trim(),
+            dose: (m.dose || '1정').trim(),
             timing: (m.note || '처방대로').trim(),
             source: '환자 직접 입력'
           }));
@@ -244,14 +304,42 @@
     }
 
     function backToQueue() {
-      selectedIndex = -1;
+      selectedId = null;
       currentConfirmedMeds = [];
       renderQueue();
       document.body.classList.remove('show-detail');
     }
 
     // ========================================================
-    // 4. 고속 이미지 캔버스 압축 (OCR 인식 최적화)
+    // 4. [신규] 접수 환자 삭제(Delete) 기능
+    // ========================================================
+    async function deleteIntake(id, event) {
+      if (event) event.stopPropagation();
+
+      const target = allIntakes.find(i => i.id === id);
+      const targetName = target ? target.patient_name : '해당';
+
+      if (!confirm(`[${targetName}] 환자의 문진 접수 내역을 정말 삭제하시겠습니까?\n삭제된 데이터는 복구할 수 없습니다.`)) {
+        return;
+      }
+
+      try {
+        const { error } = await supabaseClient.from('intakes').delete().eq('id', id);
+        if (error) throw error;
+
+        alert("접수 내역이 안전하게 삭제되었습니다.");
+        if (selectedId === id) {
+          backToQueue();
+        }
+        fetchIntakeList();
+      } catch (err) {
+        console.error("삭제 실패:", err);
+        alert("삭제 처리 중 오류가 발생했습니다: " + err.message);
+      }
+    }
+
+    // ========================================================
+    // 5. 고속 이미지 캔버스 압축 (OCR 인식 최적화)
     // ========================================================
     function compressImageForAi(dataUrl, maxDim = 1600) {
       return new Promise((resolve) => {
@@ -281,7 +369,7 @@
     }
 
     // ========================================================
-    // 5. 약봉투 / 처방전 전용 고정밀 OCR 엔진
+    // 6. 약봉투 / 처방전 전용 고정밀 OCR 엔진 (약품명/용법/1회투여량 분리)
     // ========================================================
     async function runPrescriptionOcr() {
       if (!currentPhotos || currentPhotos.length === 0) {
@@ -315,16 +403,16 @@
 제공된 이미지(조제 약봉투, 처방전, 복약안내문, 조제내역 영수증 등)에 인쇄된 텍스트를 정밀 분석하여 의약품 목록을 추출하세요.
 
 [OCR 추출 가이드]
-1. 활자로 인쇄된 모든 조제 의약품명(상품명 및 성분명)을 정확히 읽으세요.
-2. 각 약품의 용량(예: 5mg, 100mg)과 1일 복용법/시기(아침, 점심, 저녁, 자기전, 식후 30분 등)가 적혀 있다면 함께 분리하세요.
-3. 알약 형태를 억지로 추론하지 말고, 문서에 적힌 "실제 글자"만을 100% 신뢰하여 추출하세요.
+1. 인쇄된 모든 조제 의약품명(상품명 및 성분명)을 정확히 읽으세요.
+2. 약품마다 1회 투여량(예: 1정, 0.5정, 1캡슐, 10mg)과 용법(예: 1일 1회 아침식후, 1일 2회 아침/저녁, 취침전 등)을 명확히 분리하세요.
+3. 문서에 적힌 활자 그대로만 객관적으로 추출하세요.
 
 반드시 마크다운 따옴표(\`\`\`json) 없이 순수 JSON 배열만 출력하세요:
 [
   {
-    "name": "약품명 (또는 상품명)",
-    "dose": "함량/용량 (없으면 빈문자열)",
-    "timing": "복약 시기/용법 (예: 아침 식후, 자기전 등)"
+    "name": "약품명",
+    "dose": "1회 투여량 (예: 1정, 0.5정 등, 확인 불가 시 '1정')",
+    "timing": "용법/복약시기 (예: 1일 1회 아침 식후)"
   }
 ]`;
 
@@ -377,7 +465,7 @@
             if (!exists) {
               currentConfirmedMeds.push({
                 name: trimmedName,
-                dose: (m.dose || '').trim(),
+                dose: (m.dose || '1정').trim(),
                 timing: (m.timing || '처방대로').trim(),
                 source: '약봉투/처방전 OCR'
               });
@@ -387,7 +475,7 @@
         });
 
         renderMedChips();
-        alert(`약봉투/처방전에서 ${addedCount}개의 의약품을 성공적으로 추출하여 등록했습니다.`);
+        alert(`약봉투/처방전에서 ${addedCount}개의 의약품(용법/1회투여량 포함)을 성공적으로 추출하여 등록했습니다.`);
 
       } catch (err) {
         console.error("약봉투 OCR 실패:", err);
@@ -399,7 +487,7 @@
     }
 
     // ========================================================
-    // 6. 확정 약물 관리 로직
+    // 7. 확정 약물 관리 로직 (약품명 / 1회투여량 / 용법)
     // ========================================================
     function renderMedChips() {
       const container = document.getElementById('confirmedMedsList');
@@ -427,12 +515,12 @@
               <span class="w-5 h-5 rounded-full bg-emerald-100 text-emerald-800 flex items-center justify-center text-xs font-bold flex-shrink-0">${idx + 1}</span>
               <div class="truncate">
                 <span class="font-bold text-slate-900 text-xs sm:text-sm">${med.name}</span>
-                ${med.dose ? `<span class="text-xs text-slate-500 font-medium ml-1">(${med.dose})</span>` : ''}
-                ${med.source ? `<span class="text-[10px] text-slate-400 block font-normal">${med.source}</span>` : ''}
+                <span class="text-xs text-emerald-700 font-semibold ml-1.5">[1회: ${med.dose || '1정'}]</span>
+                <span class="text-xs text-slate-600 font-medium ml-1">| 용법: ${med.timing || '처방대로'}</span>
+                ${med.source ? `<span class="text-[10px] text-slate-400 block font-normal mt-0.5">${med.source}</span>` : ''}
               </div>
             </div>
-            <div class="flex items-center gap-2 flex-shrink-0">
-              <span class="text-[11px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-medium">${med.timing || '처방대로'}</span>
+            <div class="flex items-center gap-1.5 flex-shrink-0">
               <button type="button" onclick="deleteMedChip(${idx})" class="text-slate-400 hover:text-rose-600 p-1 font-bold text-base transition" title="삭제">×</button>
             </div>
           </div>
@@ -440,12 +528,15 @@
       }).join('');
     }
 
+    // 약품명 + 1회투여량 + 용법 수동 추가
     function addManualMedChip() {
       const nameInput = document.getElementById('medNameInput');
-      const timingSelect = document.getElementById('medTimingSelect');
+      const doseInput = document.getElementById('medDoseInput');
+      const timingInput = document.getElementById('medTimingInput');
       
       const name = nameInput.value.trim();
-      const timing = timingSelect.value;
+      const dose = doseInput.value.trim() || '1정';
+      const timing = timingInput.value.trim() || '1일 1회 식후';
 
       if (!name) {
         alert("약품명을 입력해 주세요.");
@@ -455,12 +546,14 @@
 
       currentConfirmedMeds.push({
         name: name,
-        dose: '',
+        dose: dose,
         timing: timing,
         source: '약사 직접 입력'
       });
 
       nameInput.value = '';
+      doseInput.value = '';
+      timingInput.value = '';
       nameInput.focus();
       renderMedChips();
     }
@@ -478,9 +571,9 @@
     }
 
     function importDirectMeds() {
-      if (selectedIndex < 0 || !allIntakes[selectedIndex]) return;
-      const item = allIntakes[selectedIndex];
-      if (!item.direct_meds || item.direct_meds.length === 0) {
+      if (!selectedId) return;
+      const item = allIntakes.find(i => i.id === selectedId);
+      if (!item || !item.direct_meds || item.direct_meds.length === 0) {
         alert("환자가 직접 입력한 약물 데이터가 없습니다.");
         return;
       }
@@ -493,7 +586,7 @@
           if (!exists) {
             currentConfirmedMeds.push({
               name: trimmed,
-              dose: (m.dose || '').trim(),
+              dose: (m.dose || '1정').trim(),
               timing: (m.note || '처방대로').trim(),
               source: '환자 직접 입력'
             });
@@ -507,7 +600,7 @@
     }
 
     // ========================================================
-    // 7. 상세 화면 렌더링
+    // 8. 상세 화면 렌더링
     // ========================================================
     function renderDetail(item) {
       document.getElementById('emptyGuide').classList.add('hidden');
@@ -572,7 +665,7 @@
               </button>
             </div>
             <table class="w-full text-left border-collapse min-w-[280px]">
-              <thead><tr class="border-b text-slate-500 text-[11px]"><th class="pb-1">약품명</th><th class="pb-1">용량</th><th class="pb-1">복용법/메모</th></tr></thead>
+              <thead><tr class="border-b text-slate-500 text-[11px]"><th class="pb-1">약품명</th><th class="pb-1">용량/1회량</th><th class="pb-1">복용법/메모</th></tr></thead>
               <tbody class="divide-y divide-slate-100">
                 ${item.direct_meds.map(m => `
                   <tr>
@@ -629,11 +722,14 @@
             </div>
             <p class="text-[11px] sm:text-xs text-slate-400 font-mono">접수일시: ${dateStr}</p>
           </div>
-          <div class="flex items-center gap-2 no-print flex-shrink-0">
-            <button type="button" onclick="toggleStatus('${item.id}', '${item.status || '대기중'}')" class="flex-1 sm:flex-initial px-3.5 py-1.5 text-xs font-bold rounded-lg border ${btnStatusClass} transition">
+          <div class="flex items-center gap-2 no-print flex-shrink-0 flex-wrap">
+            <button type="button" onclick="toggleStatus('${item.id}', '${item.status || '대기중'}')" class="px-3.5 py-1.5 text-xs font-bold rounded-lg border ${btnStatusClass} transition">
               ${btnStatusText}
             </button>
             <button type="button" onclick="window.print()" class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-800 text-white hover:bg-slate-700">인쇄</button>
+            <button type="button" onclick="deleteIntake('${item.id}')" class="px-3 py-1.5 text-xs font-bold rounded-lg bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 transition" title="접수 환자 삭제">
+              🗑️ 삭제
+            </button>
           </div>
         </div>
 
@@ -663,7 +759,7 @@
             <span class="w-6 h-6 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-bold text-xs">📄</span>
             <div>
               <p class="font-bold text-indigo-950 text-xs sm:text-sm">약봉투 또는 처방전 텍스트 자동 읽기 (OCR)</p>
-              <p class="text-slate-500 text-[11px]">선택된 사진의 활자(약품명·성분명·용법)를 AI가 2초 만에 읽어 등록합니다.</p>
+              <p class="text-slate-500 text-[11px]">선택된 사진의 활자(약품명·1회투여량·용법)를 AI가 2초 만에 읽어 등록합니다.</p>
             </div>
           </div>
           <button type="button" id="btnRunOcr" onclick="runPrescriptionOcr()" class="w-full sm:w-auto px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg text-xs transition shadow-xs whitespace-nowrap flex items-center justify-center gap-1.5">
@@ -676,7 +772,7 @@
           <p class="text-xs">약봉투 및 처방전 활자를 읽어내는 중입니다 (약 2초)...</p>
         </div>
 
-        <!-- 💊 복용 약물 최종 확정 패널 -->
+        <!-- 💊 복용 약물 최종 확정 패널 (약품명 + 1회투여량 + 용법) -->
         <div class="border border-emerald-200 rounded-xl p-4 bg-emerald-50/30 space-y-3 text-xs">
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-1.5 font-bold text-emerald-950 text-sm">
@@ -695,22 +791,14 @@
           <!-- 확정 약물 카드 목록 -->
           <div id="confirmedMedsList" class="space-y-1.5 pt-1"></div>
 
-          <!-- 약품 수동 추가 바 -->
-          <div class="pt-2 border-t border-emerald-100 flex flex-col sm:flex-row gap-2">
-            <input type="text" id="medNameInput" onkeypress="handleMedInputKeypress(event)" placeholder="약품명 입력 (예: 노바스크정 5mg, 가스모틴정) 후 Enter" class="flex-1 p-2.5 border border-slate-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500">
-            <div class="flex gap-2">
-              <select id="medTimingSelect" class="p-2 border border-slate-300 rounded-lg text-xs bg-white focus:outline-none">
-                <option value="아침 식후">아침 식후</option>
-                <option value="저녁 식후">저녁 식후</option>
-                <option value="아침/저녁">아침/저녁</option>
-                <option value="자기전">자기전</option>
-                <option value="필요시">필요시</option>
-                <option value="처방대로" selected>처방대로</option>
-              </select>
-              <button type="button" onclick="addManualMedChip()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs transition shadow-2xs whitespace-nowrap">
-                + 추가
-              </button>
-            </div>
+          <!-- 3분할 고속 입력 바 (약품명 / 1회투여량 / 용법) -->
+          <div class="pt-2.5 border-t border-emerald-100 grid grid-cols-1 sm:grid-cols-12 gap-2">
+            <input type="text" id="medNameInput" onkeypress="handleMedInputKeypress(event)" placeholder="약품명 (예: 노바스크정 5mg)" class="sm:col-span-5 p-2.5 border border-slate-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500">
+            <input type="text" id="medDoseInput" onkeypress="handleMedInputKeypress(event)" placeholder="1회투여량 (예: 1정, 0.5정)" class="sm:col-span-3 p-2.5 border border-slate-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500">
+            <input type="text" id="medTimingInput" onkeypress="handleMedInputKeypress(event)" placeholder="용법 (예: 1일 1회 아침식후)" class="sm:col-span-3 p-2.5 border border-slate-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500">
+            <button type="button" onclick="addManualMedChip()" class="sm:col-span-1 px-3 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs transition shadow-2xs whitespace-nowrap flex items-center justify-center">
+              + 추가
+            </button>
           </div>
         </div>
 
@@ -762,12 +850,13 @@
     }
 
     // ========================================================
-    // 8. 사진 선택 및 라이트박스 핸들러
+    // 9. 이벤트 및 연동 핸들러
     // ========================================================
     function selectOcrPhoto(idx) {
       selectedPhotoIndex = idx;
-      if (selectedIndex >= 0 && allIntakes[selectedIndex]) {
-        renderDetail(allIntakes[selectedIndex]);
+      if (selectedId) {
+        const item = allIntakes.find(i => i.id === selectedId);
+        if (item) renderDetail(item);
       }
     }
 
@@ -785,11 +874,8 @@
       document.getElementById('lightboxImg').src = '';
     }
 
-    // ========================================================
-    // 9. 회신서(reply.html) 연동 핸들러
-    // ========================================================
     function openReplyEditor() {
-      if (selectedIndex < 0 || !allIntakes[selectedIndex]) {
+      if (!selectedId) {
         alert("선택된 환자 데이터가 없습니다.");
         return;
       }
@@ -799,8 +885,9 @@
         if (!proceed) return;
       }
 
-      const selectedPatient = allIntakes[selectedIndex];
+      const selectedPatient = allIntakes.find(i => i.id === selectedId);
 
+      // 확정 약물 목록(약품명, 1회투여량, 용법)을 포함하여 sessionStorage에 전달
       sessionStorage.setItem('selected_patient_intake', JSON.stringify({
         ...selectedPatient,
         confirmed_meds: currentConfirmedMeds
@@ -826,8 +913,11 @@
     document.getElementById('btnConfirmCloseLightbox').addEventListener('click', closeImageLightbox);
     document.getElementById('imageLightboxModal').addEventListener('click', closeImageLightbox);
 
-    window.selectIntake = selectIntake;
+    window.selectIntakeById = selectIntakeById;
     window.backToQueue = backToQueue;
+    window.deleteIntake = deleteIntake;
+    window.handlePatientSearch = handlePatientSearch;
+    window.clearPatientSearch = clearPatientSearch;
     window.selectOcrPhoto = selectOcrPhoto;
     window.openLightboxPhoto = openLightboxPhoto;
     window.toggleStatus = toggleStatus;
