@@ -32,7 +32,7 @@
     }
   </style>
 </head>
-<body class="bg-slate-100 text-slate-800 antialiased h-screen h-[100dvh] flex flex-col overflow-hidden">
+<body class="bg-slate-100 text-slate-800 antialiased h-screen h-[100dvh] flex flex-col overflow-hidden" onclick="closeAllDropdowns(event)">
 
   <!-- 상단 네비게이션 헤더 -->
   <header class="bg-slate-900 text-white min-h-[52px] py-2 px-3 sm:px-5 flex items-center justify-between shadow-sm flex-shrink-0 no-print gap-2">
@@ -58,7 +58,7 @@
   <!-- 메인 프레임워크 -->
   <div class="flex-1 flex overflow-hidden relative">
     
-    <!-- 좌측 대기열 목록 (기존과 동일하게 유지) -->
+    <!-- 좌측 대기열 목록 -->
     <aside id="queueAside" class="bg-white border-r border-slate-200 flex flex-col flex-shrink-0 no-print h-full">
       <div class="p-3 border-b border-slate-100 flex items-center justify-between bg-slate-50">
         <span class="text-xs font-bold text-slate-700">접수 환자 목록</span>
@@ -111,7 +111,7 @@
     const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
     // ========================================================
-    // 2. 보안 스토리지 기반 Gemini API 키 관리 (GitHub 노출 차단)
+    // 2. 보안 스토리지 기반 Gemini API 키 관리
     // ========================================================
     function getGeminiApiKey() {
       let key = localStorage.getItem('MY_GEMINI_API_KEY');
@@ -138,7 +138,7 @@
     let selectedIndex = -1;
     let currentPhotos = [];
     let selectedPhotoIndex = 0;
-    let currentConfirmedMeds = []; // 확정 약물 목록 [{ name, dose, timing, source }]
+    let currentConfirmedMeds = [];
 
     // ========================================================
     // 3. 대기 목록 데이터 로드 함수 (원본 그대로 유지)
@@ -282,7 +282,7 @@
     }
 
     // ========================================================
-    // 5. 약봉투 / 처방전 OCR 엔진 (약품명, 1회투여량, 용법 추출)
+    // 5. 약봉투 / 처방전 OCR 엔진 (약품명, 1회투여량, 용법 분리 추출)
     // ========================================================
     async function runPrescriptionOcr() {
       if (!currentPhotos || currentPhotos.length === 0) {
@@ -400,7 +400,7 @@
     }
 
     // ========================================================
-    // 6. [핵심 수정] 확정 약물 관리 (약품명 / 1회투여량 / 용법 3단 구조)
+    // 6. 확정 약물 관리 로직
     // ========================================================
     function renderMedChips() {
       const container = document.getElementById('confirmedMedsList');
@@ -441,6 +441,67 @@
       }).join('');
     }
 
+    // ========================================================
+    // 7. [신규] 용법 드롭다운 및 직접 입력 인터랙션
+    // ========================================================
+    function toggleTimingDropdown(event) {
+      if (event) event.stopPropagation();
+      const menu = document.getElementById('timingDropdownMenu');
+      if (menu) {
+        menu.classList.toggle('hidden');
+      }
+    }
+
+    function closeAllDropdowns(event) {
+      const menu = document.getElementById('timingDropdownMenu');
+      if (menu && !menu.classList.contains('hidden')) {
+        menu.classList.add('hidden');
+      }
+    }
+
+    function setTimingValue(val) {
+      const hiddenInput = document.getElementById('medTimingInput');
+      const label = document.getElementById('selectedTimingLabel');
+      if (hiddenInput) hiddenInput.value = val;
+      if (label) label.innerText = val;
+      const menu = document.getElementById('timingDropdownMenu');
+      if (menu) menu.classList.add('hidden');
+    }
+
+    function appendTimingFragment(fragment) {
+      const hiddenInput = document.getElementById('medTimingInput');
+      const label = document.getElementById('selectedTimingLabel');
+      let current = (hiddenInput ? hiddenInput.value : '').trim();
+      
+      if (!current || current === '1일 1회 식후' || current === '처방대로') {
+        current = fragment;
+      } else {
+        current = current + ' ' + fragment;
+      }
+
+      if (hiddenInput) hiddenInput.value = current;
+      if (label) label.innerText = current;
+    }
+
+    function applyCustomTiming(event) {
+      if (event) event.stopPropagation();
+      const customInput = document.getElementById('customTimingInput');
+      const val = customInput ? customInput.value.trim() : '';
+      if (!val) {
+        alert("용법을 입력해 주세요.");
+        return;
+      }
+      setTimingValue(val);
+      if (customInput) customInput.value = '';
+    }
+
+    function handleCustomTimingKeypress(e) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        applyCustomTiming(e);
+      }
+    }
+
     // 3개 필드(약품명 / 1회투여량 / 용법) 수동 추가
     function addManualMedChip() {
       const nameInput = document.getElementById('medNameInput');
@@ -466,7 +527,6 @@
 
       if (nameInput) nameInput.value = '';
       if (doseInput) doseInput.value = '';
-      if (timingInput) timingInput.value = '';
       if (nameInput) nameInput.focus();
       renderMedChips();
     }
@@ -513,7 +573,7 @@
     }
 
     // ========================================================
-    // 7. 상세 화면 렌더링
+    // 8. 상세 화면 렌더링
     // ========================================================
     function renderDetail(item) {
       document.getElementById('emptyGuide').classList.add('hidden');
@@ -683,7 +743,7 @@
           <p class="text-xs">약봉투 및 처방전 활자를 읽어내는 중입니다 (약 2초)...</p>
         </div>
 
-        <!-- 💊 복용 약물 최종 확정 패널 (약품명 + 1회투여량 + 용법 3분할 구성) -->
+        <!-- 💊 복용 약물 최종 확정 패널 -->
         <div class="border border-emerald-200 rounded-xl p-4 bg-emerald-50/30 space-y-3 text-xs">
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-1.5 font-bold text-emerald-950 text-sm">
@@ -702,11 +762,65 @@
           <!-- 확정 약물 카드 목록 -->
           <div id="confirmedMedsList" class="space-y-1.5 pt-1"></div>
 
-          <!-- 3분할 고속 입력 바 (약품명 / 1회투여량 / 용법) -->
-          <div class="pt-2.5 border-t border-emerald-100 grid grid-cols-1 sm:grid-cols-12 gap-2">
+          <!-- 3분할 고속 입력 바 (약품명 / 1회투여량 / [신규] 용법 드롭다운) -->
+          <div class="pt-2.5 border-t border-emerald-100 grid grid-cols-1 sm:grid-cols-12 gap-2 relative">
+            <!-- 약품명 -->
             <input type="text" id="medNameInput" onkeypress="handleMedInputKeypress(event)" placeholder="약품명 (예: 노바스크정 5mg)" class="sm:col-span-5 p-2.5 border border-slate-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500">
-            <input type="text" id="medDoseInput" onkeypress="handleMedInputKeypress(event)" placeholder="1회투여량 (예: 1정, 0.5정)" class="sm:col-span-3 p-2.5 border border-slate-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500">
-            <input type="text" id="medTimingInput" onkeypress="handleMedInputKeypress(event)" placeholder="용법 (예: 1일 1회 아침식후)" class="sm:col-span-3 p-2.5 border border-slate-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500">
+            
+            <!-- 1회투여량 -->
+            <input type="text" id="medDoseInput" onkeypress="handleMedInputKeypress(event)" placeholder="1회량 (예: 1정)" class="sm:col-span-2 p-2.5 border border-slate-300 rounded-lg text-xs bg-white focus:outline-none focus:ring-2 focus:ring-emerald-500">
+            
+            <!-- 용법 버튼 & 드롭다운 메뉴 (하단 직접 입력창 탑재) -->
+            <div class="sm:col-span-4 relative">
+              <button type="button" id="btnTimingDropdown" onclick="toggleTimingDropdown(event)" class="w-full p-2.5 border border-slate-300 rounded-lg text-xs bg-white text-left flex items-center justify-between hover:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 transition">
+                <span id="selectedTimingLabel" class="truncate font-semibold text-slate-800">1일 1회 식후</span>
+                <span class="text-[10px] text-slate-400 ml-1">▼</span>
+              </button>
+              <input type="hidden" id="medTimingInput" value="1일 1회 식후">
+
+              <!-- 팝업 드롭다운 패널 -->
+              <div id="timingDropdownMenu" class="hidden absolute left-0 bottom-full sm:bottom-auto sm:top-full mt-1.5 w-72 sm:w-80 bg-white border border-slate-200 rounded-xl shadow-2xl z-50 p-3 space-y-2.5" onclick="event.stopPropagation()">
+                <div>
+                  <span class="text-[10px] font-bold text-slate-400 block mb-1">⚡ 추천 빈도 / 타이밍 (원클릭)</span>
+                  <div class="grid grid-cols-2 gap-1.5">
+                    <button type="button" onclick="setTimingValue('1일 1회 아침식후')" class="p-1.5 text-left bg-slate-50 hover:bg-emerald-50 hover:text-emerald-900 rounded text-[11px] border border-slate-200 truncate">1일 1회 아침식후</button>
+                    <button type="button" onclick="setTimingValue('1일 2회 아침/저녁')" class="p-1.5 text-left bg-slate-50 hover:bg-emerald-50 hover:text-emerald-900 rounded text-[11px] border border-slate-200 truncate">1일 2회 아침/저녁</button>
+                    <button type="button" onclick="setTimingValue('1일 3회 매식후')" class="p-1.5 text-left bg-slate-50 hover:bg-emerald-50 hover:text-emerald-900 rounded text-[11px] border border-slate-200 truncate">1일 3회 매식후</button>
+                    <button type="button" onclick="setTimingValue('1일 1회 취침전')" class="p-1.5 text-left bg-slate-50 hover:bg-emerald-50 hover:text-emerald-900 rounded text-[11px] border border-slate-200 truncate">1일 1회 취침전</button>
+                    <button type="button" onclick="setTimingValue('필요시 (PRN)')" class="p-1.5 text-left bg-slate-50 hover:bg-emerald-50 hover:text-emerald-900 rounded text-[11px] border border-slate-200 truncate">필요시 (PRN)</button>
+                    <button type="button" onclick="setTimingValue('처방대로 복용')" class="p-1.5 text-left bg-slate-50 hover:bg-emerald-50 hover:text-emerald-900 rounded text-[11px] border border-slate-200 truncate">처방대로 복용</button>
+                  </div>
+                </div>
+
+                <div class="pt-1 border-t border-slate-100">
+                  <span class="text-[10px] font-bold text-slate-400 block mb-1">🧩 조립용 키워드 칩</span>
+                  <div class="flex flex-wrap gap-1 text-[11px]">
+                    <button type="button" onclick="appendTimingFragment('1일 1회')" class="px-1.5 py-0.5 bg-slate-100 hover:bg-slate-200 rounded text-slate-700">1일 1회</button>
+                    <button type="button" onclick="appendTimingFragment('1일 2회')" class="px-1.5 py-0.5 bg-slate-100 hover:bg-slate-200 rounded text-slate-700">1일 2회</button>
+                    <button type="button" onclick="appendTimingFragment('1일 3회')" class="px-1.5 py-0.5 bg-slate-100 hover:bg-slate-200 rounded text-slate-700">1일 3회</button>
+                    <button type="button" onclick="appendTimingFragment('아침')" class="px-1.5 py-0.5 bg-slate-100 hover:bg-slate-200 rounded text-slate-700">아침</button>
+                    <button type="button" onclick="appendTimingFragment('점심')" class="px-1.5 py-0.5 bg-slate-100 hover:bg-slate-200 rounded text-slate-700">점심</button>
+                    <button type="button" onclick="appendTimingFragment('저녁')" class="px-1.5 py-0.5 bg-slate-100 hover:bg-slate-200 rounded text-slate-700">저녁</button>
+                    <button type="button" onclick="appendTimingFragment('취침전')" class="px-1.5 py-0.5 bg-slate-100 hover:bg-slate-200 rounded text-slate-700">취침전</button>
+                    <button type="button" onclick="appendTimingFragment('식후')" class="px-1.5 py-0.5 bg-slate-100 hover:bg-slate-200 rounded text-slate-700">식후</button>
+                    <button type="button" onclick="appendTimingFragment('식전 30분')" class="px-1.5 py-0.5 bg-slate-100 hover:bg-slate-200 rounded text-slate-700">식전 30분</button>
+                  </div>
+                </div>
+
+                <!-- ✏️ 드롭다운 하단 직접 입력창 -->
+                <div class="pt-2 border-t border-slate-100">
+                  <span class="text-[10px] font-bold text-slate-500 block mb-1">✍️ 용법 직접 입력</span>
+                  <div class="flex gap-1.5">
+                    <input type="text" id="customTimingInput" onkeypress="handleCustomTimingKeypress(event)" placeholder="예: 1일 1회 저녁식후 30분" class="flex-1 p-1.5 border border-slate-300 rounded text-xs bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500">
+                    <button type="button" onclick="applyCustomTiming(event)" class="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-900 text-white rounded text-xs font-semibold whitespace-nowrap">
+                      적용
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 추가 버튼 -->
             <button type="button" onclick="addManualMedChip()" class="sm:col-span-1 px-3 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-xs transition shadow-2xs whitespace-nowrap flex items-center justify-center">
               + 추가
             </button>
@@ -761,7 +875,7 @@
     }
 
     // ========================================================
-    // 8. 사진 선택 및 라이트박스 핸들러
+    // 9. 사진 선택 및 라이트박스 핸들러
     // ========================================================
     function selectOcrPhoto(idx) {
       selectedPhotoIndex = idx;
@@ -785,7 +899,7 @@
     }
 
     // ========================================================
-    // 9. 회신서(reply.html) 연동 핸들러
+    // 10. 회신서(reply.html) 연동 핸들러
     // ========================================================
     function openReplyEditor() {
       if (selectedIndex < 0 || !allIntakes[selectedIndex]) {
@@ -837,6 +951,12 @@
     window.handleMedInputKeypress = handleMedInputKeypress;
     window.runPrescriptionOcr = runPrescriptionOcr;
     window.resetGeminiApiKey = resetGeminiApiKey;
+    window.toggleTimingDropdown = toggleTimingDropdown;
+    window.closeAllDropdowns = closeAllDropdowns;
+    window.setTimingValue = setTimingValue;
+    window.appendTimingFragment = appendTimingFragment;
+    window.applyCustomTiming = applyCustomTiming;
+    window.handleCustomTimingKeypress = handleCustomTimingKeypress;
 
     // 실시간 웹소켓 구독
     supabaseClient
