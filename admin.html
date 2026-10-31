@@ -185,6 +185,9 @@
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;');
     }
+    function escapeHtml(str) {
+      return escapeHtmlAttr(str);
+    }
 
     // ========================================================
     // 3. 환자별 작성 데이터(약물 목록 + 입력창) 자동 보존 엔진
@@ -603,6 +606,263 @@
       });
     }
 
+    // ========================================================
+    // 하이브리드 낱알식별 보강 엔진 (SPEC-202610-ADMIN-PILL-OCR-01)
+    // ========================================================
+    function withTimeout(promise, ms) {
+      return new Promise(function(resolve, reject) {
+        const timer = setTimeout(function() {
+          reject(new Error("Supabase query timeout (" + ms + "ms)"));
+        }, ms || 2500);
+        promise.then(
+          function(val) { clearTimeout(timer); resolve(val); },
+          function(err) { clearTimeout(timer); reject(err); }
+        );
+      });
+    }
+
+    // Supabase public.pill_identifications 마스터 DB 교차검증 및 낱알 역조회 모듈
+    async function crossValidateWithPillDb(rawDrugName, rawDose, pillFeature) {
+      const fallback = {
+        verifiedName: rawDrugName || '',
+        officialItemName: '',
+        ingredient: '',
+        itemSeq: '',
+        imgUrl: '',
+        imprint: '',
+        shape: '',
+        chart: '',
+        sourceType: pillFeature ? 'pill_unmatched' : 'ocr_raw',
+        candidates: []
+      };
+
+      if (!supabaseClient) return fallback;
+
+      try {
+        // Case A — 인쇄 활자 약품명이 있는 경우 (교차검증 & 실물 메타데이터 선제 결합)
+        if (rawDrugName && rawDrugName.trim()) {
+          const stripped = rawDrugName.replace(/\([^)]*\)/g, '').trim();
+
+          // doseToken 추출 (예: "5/20", "20", "2.5", "100")
+          let doseToken = '';
+          const doseMatch = (rawDrugName + ' ' + (rawDose || '')).match(/(\d+(?:\.\d+)?(?:\/\d+(?:\.\d+)?)*)\s*(?:mg|g|mcg|ml|밀리그램)?/i);
+          if (doseMatch) {
+            doseToken = doseMatch[1];
+          }
+
+          // 순수 브랜드명 추출 (숫자, 단위, 제형 제거)
+          let cleanBrand = stripped.replace(/[\d\.\/]+\s*(?:mg|g|mcg|ml|밀리그램|정|캡슐)?$/i, '').trim();
+          if (!cleanBrand || cleanBrand.length < 2) cleanBrand = stripped.split(/\s+/)[0];
+
+          let stemBrand = cleanBrand.replace(/(?:서방정|연질캡슐|장용정|서방캡슐|정|캡슐|시럽|산)$/, '');
+          if (!stemBrand || stemBrand.length < 2) stemBrand = cleanBrand;
+
+          const query = supabaseClient
+            .from('pill_identifications')
+            .select('item_seq, item_name, entp_name, chart, item_image, print_front, print_back, drug_shape, color_class1')
+            .ilike('item_name', '%' + stemBrand + '%')
+            .limit(25);
+
+          const res = await withTimeout(query, 2500);
+          if (res.error) throw res.error;
+
+          const rows = res.data || [];
+          if (rows.length === 0) {
+            return fallback;
+          }
+
+          // 후보 가중치 정렬 (동일 허가번호 다중 용량 오매칭 방지)
+          const scored = rows.map(function(item) {
+            let score = 0;
+            const itemName = item.item_name || '';
+
+            // ① 브랜드명 정확도 가중치 (cleanBrand 시작 우대)
+            if (itemName.startsWith(cleanBrand)) {
+              score += 40;
+            } else if (itemName.startsWith(stemBrand)) {
+              score += 25;
+            } else if (itemName.includes(cleanBrand)) {
+              score += 15;
+            } else {
+              score += 5;
+            }
+
+            // 타 복합제(에이치씨티, 플러스 등) 혼입 감점
+            const comboKeywords = ['에이치씨티', '플러스', '컴포지트', '듀오', '콤비'];
+            comboKeywords.forEach(function(kw) {
+              if (itemName.includes(kw) && !rawDrugName.includes(kw)) {
+                score -= 25;
+              }
+            });
+
+            // ② 용량 정밀 가중치 매칭 (복합제 5/20 또는 단일제 20밀리그램)
+            if (doseToken) {
+              if (doseToken.includes('/')) {
+                if (itemName.includes(doseToken)) {
+                  score += 60; // 5/20 정확 매칭 최고 가산점
+                }
+              } else {
+                const doseRegex = new RegExp('(?:^|[^\\d])' + doseToken.replace('.', '\\.') + '(?:밀리그램|mg|g|mcg|\\b)', 'i');
+                if (doseRegex.test(itemName)) {
+                  score += 50;
+                } else if (itemName.includes(doseToken)) {
+                  score += 20;
+                }
+              }
+            }
+
+            // ③ 식약처 실물 이미지 보유 행 우대
+            if (item.item_image && item.item_image.startsWith('http')) {
+              score += 10;
+            }
+
+            return { item: item, score: score };
+          });
+
+          scored.sort(function(a, b) { return b.score - a.score; });
+          const best = scored[0].item;
+
+          // 주성분 추출 (괄호 안 마지막 텍스트)
+          const ingMatch = best.item_name.match(/\(([^)]+)\)\s*$/);
+          const extractedIng = ingMatch ? ingMatch[1].trim() : '';
+
+          return {
+            verifiedName: rawDrugName,
+            officialItemName: best.item_name,
+            ingredient: extractedIng || rawDrugName,
+            itemSeq: best.item_seq || '',
+            imgUrl: best.item_image || '',
+            imprint: [best.print_front, best.print_back].filter(Boolean).join(' / '),
+            shape: [best.color_class1, best.drug_shape].filter(Boolean).join(' '),
+            chart: best.chart || '',
+            sourceType: 'ocr_verified',
+            candidates: []
+          };
+        }
+
+        // Case B — 약품명 활자 없이 낱알 특징(pillFeature)만 있는 경우 (낱알 DB 역조회)
+        if (pillFeature) {
+          const f = (pillFeature.imprint || '').trim();
+          const b = (pillFeature.imprint_back || '').trim();
+
+          if (!f && !b) {
+            const desc = [pillFeature.color, pillFeature.shape].filter(Boolean).join(' ');
+            return {
+              verifiedName: '[각인 미상 알약: ' + (desc || '형상 불명') + ']',
+              officialItemName: '',
+              ingredient: '',
+              itemSeq: '',
+              imgUrl: '',
+              imprint: '',
+              shape: desc,
+              chart: '',
+              sourceType: 'pill_unmatched',
+              candidates: []
+            };
+          }
+
+          let query = supabaseClient
+            .from('pill_identifications')
+            .select('item_seq, item_name, entp_name, chart, item_image, print_front, print_back, drug_shape, color_class1');
+
+          if (f && b) {
+            query = query.ilike('print_front', '%' + f + '%').ilike('print_back', '%' + b + '%');
+          } else {
+            const imp = f || b;
+            query = query.or('print_front.ilike.%' + imp + '%,print_back.ilike.%' + imp + '%');
+          }
+
+          const res = await withTimeout(query.limit(20), 2500);
+          if (res.error) throw res.error;
+
+          const rows = res.data || [];
+          if (rows.length === 0) {
+            const desc = [pillFeature.color, pillFeature.shape].filter(Boolean).join(' ');
+            const impLabel = [f, b].filter(Boolean).join(' / ') || '미상';
+            return {
+              verifiedName: '[각인 미상 알약: ' + desc + ' (' + impLabel + ')]',
+              officialItemName: '',
+              ingredient: '',
+              itemSeq: '',
+              imgUrl: '',
+              imprint: impLabel,
+              shape: desc,
+              chart: '',
+              sourceType: 'pill_unmatched',
+              candidates: []
+            };
+          }
+
+          const candidates = rows.map(function(item) {
+            let score = 20;
+            if (f && (item.print_front === f || item.print_back === f)) score += 30;
+            if (b && (item.print_back === b || item.print_front === b)) score += 30;
+            if (pillFeature.shape && item.drug_shape && item.drug_shape.includes(pillFeature.shape)) score += 20;
+            if (pillFeature.color && item.color_class1 && (item.color_class1.includes(pillFeature.color) || pillFeature.color.includes(item.color_class1))) score += 20;
+            if (item.item_image && item.item_image.startsWith('http')) score += 10;
+
+            const ingMatch = item.item_name.match(/\(([^)]+)\)\s*$/);
+            const cleanName = item.item_name.replace(/\([^)]+\)\s*$/, '').trim();
+
+            return {
+              score: score,
+              name: cleanName,
+              officialItemName: item.item_name,
+              ingredient: ingMatch ? ingMatch[1].trim() : '',
+              itemSeq: item.item_seq || '',
+              imgUrl: item.item_image || '',
+              imprint: [item.print_front, item.print_back].filter(Boolean).join(' / '),
+              shape: [item.color_class1, item.drug_shape].filter(Boolean).join(' '),
+              chart: item.chart || ''
+            };
+          });
+
+          candidates.sort(function(a, b) { return b.score - a.score; });
+          const best = candidates[0];
+
+          return {
+            verifiedName: best.name,
+            officialItemName: best.officialItemName,
+            ingredient: best.ingredient,
+            itemSeq: best.itemSeq,
+            imgUrl: best.imgUrl,
+            imprint: best.imprint,
+            shape: best.shape,
+            chart: best.chart,
+            sourceType: 'pill_db',
+            candidates: candidates.slice(0, 5)
+          };
+        }
+
+        return fallback;
+      } catch (err) {
+        console.warn("crossValidateWithPillDb 실패 (장애 격리 안전 기본값 채택):", err);
+        return fallback;
+      }
+    }
+
+    // 낱알DB 역조회 후보 1클릭 교체 함수
+    function selectPillCandidate(medIdx, candIdx) {
+      if (!currentConfirmedMeds[medIdx] || !currentConfirmedMeds[medIdx].candidates) return;
+      const cand = currentConfirmedMeds[medIdx].candidates[candIdx];
+      if (!cand) return;
+
+      currentConfirmedMeds[medIdx].name = cand.name;
+      currentConfirmedMeds[medIdx].officialItemName = cand.officialItemName;
+      currentConfirmedMeds[medIdx].ingredient = cand.ingredient;
+      currentConfirmedMeds[medIdx].itemSeq = cand.itemSeq;
+      currentConfirmedMeds[medIdx].imgUrl = cand.imgUrl;
+      currentConfirmedMeds[medIdx].imprint = cand.imprint;
+      currentConfirmedMeds[medIdx].shape = cand.shape;
+      currentConfirmedMeds[medIdx].chart = cand.chart;
+      currentConfirmedMeds[medIdx].sourceType = 'pill_db';
+      currentConfirmedMeds[medIdx].source = '낱알식별 DB 역조회 (약사 선택)';
+
+      renderMedChips();
+      saveCurrentPatientDraft();
+      renderQueue();
+    }
+
     async function runPrescriptionOcr() {
       if (!currentPhotos || currentPhotos.length === 0) {
         alert("첨부된 사진이 없습니다.");
@@ -630,29 +890,38 @@
         const compressedDataUrl = await compressImageForAi(targetPhoto.dataUrl);
         const base64Data = compressedDataUrl.split(',')[1];
 
-        // 지능형 2-트랙 분류 프롬프트: 처방 조제약 vs 일반약/건기식/영양제/파스 분리 추출
+        // 지능형 2-트랙 및 낱알식별 특징 추출 프롬프트
         const prompt = [
           "당신은 대한민국 병원 및 약국의 문서·의약품·건강기능식품 판독 전문 수석약사입니다.",
-          "제공된 이미지(처방전, 조제 약봉투, 일반의약품 겉포장 상자, 건강기능식품/영양제 라벨 병, 파스 포장지, 조제 영수증 등)를 정밀 분석하여 의약품 및 영양제 목록을 추출하세요.",
+          "제공된 이미지(처방전, 조제 약봉투, 일반의약품 겉포장 상자, 건강기능식품/영양제 라벨 병, 파스 포장지, 조제 영수증, 낱알 알약 실물 사진 등)를 정밀 분석하여 의약품 및 영양제 목록을 추출하세요.",
           "",
           "[추출 및 자동 분류 절대 규칙]",
-          "이미지에 나타난 품목을 성격에 따라 반드시 아래 2개 그룹으로 명확히 구분하여 출력하세요:",
+          "이미지에 나타난 품목을 성격에 따라 반드시 아래 3개 그룹으로 명확히 구분하여 출력하세요:",
           "1. prescription_meds (병원/의원 처방 조제약):",
-          "   - 처방전, 조제 약봉투, 복약안내문에 인쇄된 전문의약품 및 조제 약제",
-          "   - name(약품명), dose(1회량, 예: 1정), timing(용법, 예: 1일 1회 아침식후)",
+          "   - 처방전, 조제 약봉투, 복약안내문, 조제 영수증에 인쇄된 전문의약품 및 조제 약제 활자",
+          "   - name(약품명), dose(1회량, 예: 1정), timing(용법, 예: 1일 1회 아침 식후)",
           "2. otc_supplements (환자 복용 일반약 · 영양제 · 건강기능식품 · 파스):",
           "   - 영양제, 비타민, 오메가3, 유산균, 루테인, 미네랄, 마그네슘, 밀크씨슬, 홍삼, 콜라겐 등 건강기능식품",
           "   - 약국에서 처방 없이 구매한 일반의약품(진통제, 감기약, 소화제 등), 한약제제",
           "   - 외용 관절 파스, 소염진통 외용제, 바르는 연고 등",
           "   - name(품목명), note(복용법 또는 구분 메모, 예: 1일 1회 복용, 주 2~3회 부착 등)",
+          "3. pill_features (인쇄 활자 없이 알약 실물만 찍힌 경우의 시각 특징):",
+          "   - 약봉투나 처방전 활자 없이 오직 낱알(알약) 실물만 찍힌 사진일 때 시각적으로 확인되는 객관적 팩트만 추출합니다.",
+          "   - 통계적 추측으로 유명 약품명을 지어내지 마세요(환각 절대 금지). 오직 눈에 보이는 각인, 형태, 색상만 추출합니다.",
+          "   - imprint(알약 앞면 각인), imprint_back(알약 뒷면 보조 각인), shape(모양: 원형, 타원형, 장방형 등), color(색상: 하양, 노랑, 주황 등), estimated_dose(추정 1회량, 기본 '1정')",
+          "   - 동일 알약의 앞·뒷면을 찍은 사진이라면 1개의 알약 특징으로 결합하세요.",
+          "   - 중요: 약봉투 위에 인쇄된 약품명이 이미 prescription_meds로 모두 추출된 사진이라면 중복 등록 방지를 위해 pill_features는 반드시 빈 배열([])로 반환하세요.",
           "",
           "반드시 마크다운 기호 없이 순수 JSON 객체만 출력하세요:",
           "{",
           '  "prescription_meds": [',
-          '    { "name": "약품명", "dose": "1정", "timing": "1일 1회 식후" }',
+          '    { "name": "세비카정 5/20mg", "dose": "1정", "timing": "1일 1회 아침 식후" }',
           '  ],',
           '  "otc_supplements": [',
-          '    { "name": "품목명", "note": "복용법 또는 사용구분" }',
+          '    { "name": "오메가3", "note": "1일 1회 식후" }',
+          '  ],',
+          '  "pill_features": [',
+          '    { "imprint": "C73", "imprint_back": "", "shape": "원형", "color": "하양", "estimated_dose": "1정" }',
           '  ]',
           "}"
         ].join("\n");
@@ -710,38 +979,100 @@
         let addedRxCount = 0;
         let addedOtcCount = 0;
 
-        // 1) 처방약 배열 분기 등록
+        // 1) 처방약 배열 분기 등록 (DB 교차검증 병렬 수행)
         const rxList = Array.isArray(parsedResult) ? parsedResult : (parsedResult.prescription_meds || []);
-        rxList.forEach(function(m) {
-          if (m.name && m.name.trim()) {
-            const trimmedName = m.name.trim();
-            // 영양제/일반약 키워드가 섞여 들어온 경우 방어 필터링
-            if (/오메가|루테인|비타민|유산균|밀크씨슬|마그네슘|칼슘|아연|홍삼|콜라겐|파스/.test(trimmedName) && !Array.isArray(parsedResult)) {
-              if (!currentConfirmedOtc.some(function(o) { return o.name === trimmedName; })) {
-                currentConfirmedOtc.push({
-                  name: trimmedName,
-                  note: (m.timing || '복용 중').trim(),
-                  source: '사진 자동인식'
-                });
-                addedOtcCount++;
-              }
-              return;
-            }
+        const rxValidated = await Promise.all(rxList.map(async function(m) {
+          if (!m || !m.name || !m.name.trim()) return null;
+          const trimmedName = m.name.trim();
 
-            const exists = currentConfirmedMeds.some(function(cur) { return cur.name === trimmedName; });
-            if (!exists) {
-              currentConfirmedMeds.push({
+          // 영양제/일반약 키워드가 섞여 들어온 경우 방어 필터링
+          if (/오메가|루테인|비타민|유산균|밀크씨슬|마그네슘|칼슘|아연|홍삼|콜라겐|파스/.test(trimmedName) && !Array.isArray(parsedResult)) {
+            if (!currentConfirmedOtc.some(function(o) { return o.name === trimmedName; })) {
+              currentConfirmedOtc.push({
                 name: trimmedName,
-                dose: (m.dose || '1정').trim(),
-                timing: (m.timing || '처방대로').trim(),
-                source: '약봉투/처방전 OCR'
+                note: (m.timing || '복용 중').trim(),
+                source: '사진 자동인식'
               });
-              addedRxCount++;
+              addedOtcCount++;
             }
+            return null;
+          }
+
+          let dbData = null;
+          try {
+            dbData = await crossValidateWithPillDb(trimmedName, m.dose || '1정', null);
+          } catch (e) {
+            console.warn("Pill DB cross validation skipped:", e);
+          }
+
+          return {
+            name: trimmedName,
+            dose: (m.dose || '1정').trim(),
+            timing: (m.timing || '처방대로').trim(),
+            ingredient: (dbData && dbData.ingredient) ? dbData.ingredient : '',
+            officialItemName: (dbData && dbData.officialItemName) ? dbData.officialItemName : '',
+            itemSeq: (dbData && dbData.itemSeq) ? dbData.itemSeq : '',
+            imgUrl: (dbData && dbData.imgUrl) ? dbData.imgUrl : '',
+            imprint: (dbData && dbData.imprint) ? dbData.imprint : '',
+            shape: (dbData && dbData.shape) ? dbData.shape : '',
+            chart: (dbData && dbData.chart) ? dbData.chart : '',
+            sourceType: (dbData && dbData.sourceType && dbData.sourceType !== 'ocr_raw') ? dbData.sourceType : 'ocr_raw',
+            source: (dbData && dbData.sourceType === 'ocr_verified') ? '약봉투 OCR · DB검증✔' : '약봉투/처방전 OCR'
+          };
+        }));
+
+        rxValidated.forEach(function(item) {
+          if (!item) return;
+          const exists = currentConfirmedMeds.some(function(cur) { return cur.name === item.name; });
+          if (!exists) {
+            currentConfirmedMeds.push(item);
+            addedRxCount++;
           }
         });
 
-        // 2) 일반약 / 영양제 / 건기식 배열 분기 등록 (영양제 탭으로 직행)
+        // 2) 낱알 특징(pill_features) 역조회 등록 (인쇄 활자 없는 알약 사진 대응)
+        const featList = (!Array.isArray(parsedResult) && Array.isArray(parsedResult.pill_features)) ? parsedResult.pill_features : [];
+        if (featList.length > 0) {
+          const featValidated = await Promise.all(featList.map(async function(feat) {
+            if (!feat || (!feat.imprint && !feat.shape && !feat.color)) return null;
+
+            let dbData = null;
+            try {
+              dbData = await crossValidateWithPillDb('', feat.estimated_dose || '1정', feat);
+            } catch (e) {
+              console.warn("Pill feature reverse lookup skipped:", e);
+            }
+
+            if (!dbData) return null;
+
+            return {
+              name: dbData.verifiedName,
+              dose: (feat.estimated_dose || '1정').trim(),
+              timing: '처방대로',
+              ingredient: dbData.ingredient || '',
+              officialItemName: dbData.officialItemName || '',
+              itemSeq: dbData.itemSeq || '',
+              imgUrl: dbData.imgUrl || '',
+              imprint: dbData.imprint || feat.imprint || '',
+              shape: dbData.shape || [feat.color, feat.shape].filter(Boolean).join(' '),
+              chart: dbData.chart || '',
+              sourceType: dbData.sourceType, // 'pill_db' or 'pill_unmatched'
+              candidates: dbData.candidates || [],
+              source: dbData.sourceType === 'pill_db' ? '낱알식별 DB 역조회' : '낱알 사진 식별 요망'
+            };
+          }));
+
+          featValidated.forEach(function(item) {
+            if (!item) return;
+            const exists = currentConfirmedMeds.some(function(cur) { return cur.name === item.name; });
+            if (!exists) {
+              currentConfirmedMeds.push(item);
+              addedRxCount++;
+            }
+          });
+        }
+
+        // 3) 일반약 / 영양제 / 건기식 배열 분기 등록 (영양제 탭으로 직행)
         const otcList = parsedResult.otc_supplements || [];
         otcList.forEach(function(o) {
           if (o.name && o.name.trim()) {
@@ -764,7 +1095,7 @@
         renderQueue();
 
         let msg = [];
-        if (addedRxCount > 0) msg.push(`처방약 ${addedRxCount}개 [복용 약물목록] 등록`);
+        if (addedRxCount > 0) msg.push(`처방약 및 낱알 ${addedRxCount}개 [복용 약물목록] 등록`);
         if (addedOtcCount > 0) msg.push(`영양제·일반약 ${addedOtcCount}개 [영양제·건기식 목록] 자동 분류 등록`);
         
         if (msg.length === 0) {
@@ -844,16 +1175,54 @@
           `;
         }
 
-        // [일반 보기 모드]: 약품명 클릭 또는 [✏️ 수정] 클릭 시 즉시 수정 모드로 진입, [✕] 클릭 시 삭제
+        // [일반 보기 모드]: 실물 알약 썸네일 + 출처 및 각인 검증 뱃지
+        var thumbHtml = '';
+        if (med.imgUrl) {
+          thumbHtml = '<img src="' + escapeHtmlAttr(med.imgUrl) + '" alt="' + escapeHtmlAttr(med.name) + '" class="w-12 h-8 rounded border border-slate-200 bg-white object-contain shrink-0" referrerpolicy="no-referrer" onerror="this.style.display=\'none\'">';
+        }
+
+        var badgeHtml = '';
+        if (med.sourceType === 'ocr_verified') {
+          badgeHtml = '<span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200">약봉투 OCR · DB검증✔</span>' +
+            (med.imprint ? '<span class="text-[10px] text-slate-500 font-mono ml-1">[각인: ' + escapeHtml(med.imprint) + ']</span>' : '');
+        } else if (med.sourceType === 'pill_db') {
+          badgeHtml = '<span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-300">낱알DB 역조회 (각인: ' + escapeHtml(med.imprint || '확인') + ')</span>';
+        } else if (med.sourceType === 'pill_unmatched') {
+          badgeHtml = '<span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200">식별 요망</span>' +
+            '<a href="https://www.health.kr/searchIdentity/search.asp" target="_blank" rel="noopener noreferrer" class="text-[10px] font-bold text-rose-600 hover:text-rose-800 underline ml-1" onclick="event.stopPropagation()">[약학정보원 검색 ↗]</a>';
+        } else {
+          badgeHtml = '<span class="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">' + escapeHtml(med.source || '약봉투 OCR') + '</span>';
+        }
+
+        var candidatesHtml = '';
+        if (med.sourceType === 'pill_db' && Array.isArray(med.candidates) && med.candidates.length > 1) {
+          candidatesHtml = '<div class="mt-1 flex flex-wrap gap-1 items-center" onclick="event.stopPropagation()">' +
+            '<span class="text-[10px] text-slate-400 font-semibold">다른 후보:</span>' +
+            med.candidates.slice(1, 5).map(function(c, cIdx) {
+              var shortName = c.name ? c.name.split('(')[0].trim() : '후보';
+              return '<button type="button" onclick="selectPillCandidate(' + idx + ', ' + (cIdx + 1) + ')" class="text-[10px] px-1.5 py-0.5 bg-white hover:bg-amber-100 text-amber-900 border border-amber-300 rounded font-medium transition" title="' + escapeHtmlAttr(c.officialItemName || c.name) + '">' +
+                escapeHtml(shortName) +
+              '</button>';
+            }).join('') +
+          '</div>';
+        }
+
         return `
           <div class="flex items-center justify-between gap-2 p-2.5 bg-white border border-slate-200 hover:border-emerald-300 rounded-xl shadow-sm transition">
-            <div class="flex items-center gap-2 flex-1 min-w-0 cursor-pointer" onclick="startEditMedChip(${idx})" title="클릭하여 오탈자 수정">
+            <div class="flex items-center gap-2.5 flex-1 min-w-0 cursor-pointer" onclick="startEditMedChip(${idx})" title="클릭하여 오탈자 수정">
               <span class="w-5 h-5 rounded-full bg-emerald-100 text-emerald-800 flex items-center justify-center text-xs font-bold flex-shrink-0">${idx + 1}</span>
-              <div class="truncate">
-                <span class="font-bold text-slate-900 text-xs sm:text-sm hover:text-indigo-600 transition">${med.name}</span>
-                <span class="text-xs text-emerald-700 font-semibold ml-1.5">[1회: ${med.dose || '1정'}]</span>
-                <span class="text-xs text-slate-600 font-medium ml-1">· 용법: ${med.timing || '처방대로'}</span>
-                ${med.source ? `<span class="text-[10px] text-slate-400 block font-normal mt-0.5">${med.source}</span>` : ''}
+              ${thumbHtml}
+              <div class="truncate flex-1 min-w-0">
+                <div class="flex items-center gap-1.5 flex-wrap">
+                  <span class="font-bold text-slate-900 text-xs sm:text-sm hover:text-indigo-600 transition">${escapeHtml(med.name)}</span>
+                  <span class="text-xs text-emerald-700 font-semibold">[1회: ${escapeHtml(med.dose || '1정')}]</span>
+                  <span class="text-xs text-slate-600 font-medium">· 용법: ${escapeHtml(med.timing || '처방대로')}</span>
+                </div>
+                <div class="mt-0.5 flex items-center gap-1 flex-wrap">
+                  ${badgeHtml}
+                  ${med.shape ? `<span class="text-[10px] text-slate-400 font-normal">· ${escapeHtml(med.shape)}</span>` : ''}
+                </div>
+                ${candidatesHtml}
               </div>
             </div>
             <div class="flex items-center gap-1 flex-shrink-0">
@@ -955,8 +1324,8 @@
       }, 20);
     }
 
-    // 인라인 수정 저장
-    function saveEditMedChip(idx) {
+    // 인라인 수정 저장 (DB 교차검증 자동 연동)
+    async function saveEditMedChip(idx) {
       const nameEl = document.getElementById('editMedName_' + idx);
       const doseEl = document.getElementById('editMedDose_' + idx);
       const timingEl = document.getElementById('editMedTiming_' + idx);
@@ -971,13 +1340,31 @@
         return;
       }
 
-      const prevSource = currentConfirmedMeds[idx] ? (currentConfirmedMeds[idx].source || '') : '';
+      // 수정된 약품명·용량에 맞게 식약처 실물 사진과 각인 자동 갱신
+      let dbData = null;
+      try {
+        dbData = await crossValidateWithPillDb(newName, newDose, null);
+      } catch (e) {
+        console.warn("Edit save DB validation failed:", e);
+      }
+
+      const prevMed = currentConfirmedMeds[idx] || {};
+      const prevSource = prevMed.source || '';
       const updatedSource = prevSource.indexOf('(약사 교정)') !== -1 ? prevSource : (prevSource ? prevSource + ' (약사 교정)' : '약사 교정');
 
       currentConfirmedMeds[idx] = {
         name: newName,
         dose: newDose,
         timing: newTiming,
+        ingredient: (dbData && dbData.ingredient) ? dbData.ingredient : (prevMed.ingredient || ''),
+        officialItemName: (dbData && dbData.officialItemName) ? dbData.officialItemName : (prevMed.officialItemName || ''),
+        itemSeq: (dbData && dbData.itemSeq) ? dbData.itemSeq : (prevMed.itemSeq || ''),
+        imgUrl: (dbData && dbData.imgUrl) ? dbData.imgUrl : (prevMed.imgUrl || ''),
+        imprint: (dbData && dbData.imprint) ? dbData.imprint : (prevMed.imprint || ''),
+        shape: (dbData && dbData.shape) ? dbData.shape : (prevMed.shape || ''),
+        chart: (dbData && dbData.chart) ? dbData.chart : (prevMed.chart || ''),
+        sourceType: (dbData && dbData.sourceType && dbData.sourceType !== 'ocr_raw') ? dbData.sourceType : (prevMed.sourceType || 'manual'),
+        candidates: prevMed.candidates || [],
         source: updatedSource
       };
 
@@ -1033,7 +1420,7 @@
       return parts.length > 0 ? parts.join(' ') : '1일 1회 식후';
     }
 
-    function addManualMedChip() {
+    async function addManualMedChip() {
       const nameInput = document.getElementById('medNameInput');
       const doseInput = document.getElementById('medDoseInput');
 
@@ -1047,11 +1434,27 @@
         return;
       }
 
+      let dbData = null;
+      try {
+        dbData = await crossValidateWithPillDb(name, dose, null);
+      } catch (e) {
+        console.warn("Manual add DB validation failed:", e);
+      }
+
       currentConfirmedMeds.push({
         name: name,
         dose: dose,
         timing: timing,
-        source: '약사 직접 입력'
+        ingredient: (dbData && dbData.ingredient) ? dbData.ingredient : '',
+        officialItemName: (dbData && dbData.officialItemName) ? dbData.officialItemName : '',
+        itemSeq: (dbData && dbData.itemSeq) ? dbData.itemSeq : '',
+        imgUrl: (dbData && dbData.imgUrl) ? dbData.imgUrl : '',
+        imprint: (dbData && dbData.imprint) ? dbData.imprint : '',
+        shape: (dbData && dbData.shape) ? dbData.shape : '',
+        chart: (dbData && dbData.chart) ? dbData.chart : '',
+        sourceType: (dbData && dbData.sourceType && dbData.sourceType !== 'ocr_raw') ? dbData.sourceType : 'manual',
+        candidates: [],
+        source: (dbData && dbData.sourceType === 'ocr_verified') ? '약사 직접 입력 · DB검증✔' : '약사 직접 입력'
       });
 
       if (nameInput) nameInput.value = '';
@@ -1083,7 +1486,7 @@
       renderQueue();
     }
 
-    function importDirectMeds() {
+    async function importDirectMeds() {
       if (selectedIndex < 0 || !allIntakes[selectedIndex]) return;
       const item = allIntakes[selectedIndex];
       if (!item.direct_meds || item.direct_meds.length === 0) {
@@ -1092,21 +1495,35 @@
       }
 
       let count = 0;
-      item.direct_meds.forEach(function(m) {
+      for (const m of item.direct_meds) {
         if (m.name && m.name.trim()) {
           const trimmed = m.name.trim();
           const exists = currentConfirmedMeds.some(function(cur) { return cur.name === trimmed; });
           if (!exists) {
+            let dbData = null;
+            try {
+              dbData = await crossValidateWithPillDb(trimmed, m.dose || '1정', null);
+            } catch (e) {}
+
             currentConfirmedMeds.push({
               name: trimmed,
               dose: (m.dose || '1정').trim(),
               timing: (m.note || '처방대로').trim(),
-              source: '환자 직접 입력'
+              ingredient: (dbData && dbData.ingredient) ? dbData.ingredient : '',
+              officialItemName: (dbData && dbData.officialItemName) ? dbData.officialItemName : '',
+              itemSeq: (dbData && dbData.itemSeq) ? dbData.itemSeq : '',
+              imgUrl: (dbData && dbData.imgUrl) ? dbData.imgUrl : '',
+              imprint: (dbData && dbData.imprint) ? dbData.imprint : '',
+              shape: (dbData && dbData.shape) ? dbData.shape : '',
+              chart: (dbData && dbData.chart) ? dbData.chart : '',
+              sourceType: (dbData && dbData.sourceType === 'ocr_verified') ? 'ocr_verified' : 'patient_direct',
+              candidates: [],
+              source: (dbData && dbData.sourceType === 'ocr_verified') ? '환자 직접 입력 · DB검증✔' : '환자 직접 입력'
             });
             count++;
           }
         }
-      });
+      }
 
       editingMedIndex = -1;
       renderMedChips();
@@ -1626,6 +2043,23 @@
         }
       }
 
+      // confirmed_meds 표준 객체 매핑 ({ name, ingredient, dose, timing, role, itemSeq, imgUrl, shape, imprint, chart, sourceType })
+      const mappedConfirmedMeds = currentConfirmedMeds.map(function(m) {
+        return {
+          name: m.name || '',
+          ingredient: m.ingredient || '',
+          dose: m.dose || '1정',
+          timing: m.timing || '처방대로',
+          role: m.role || '',
+          itemSeq: m.itemSeq || '',
+          imgUrl: m.imgUrl || '',
+          shape: m.shape || '',
+          imprint: m.imprint || '',
+          chart: m.chart || '',
+          sourceType: m.sourceType || 'manual'
+        };
+      });
+
       // currentConfirmedOtc를 문자열과 객체 배열 두 가지 형태로 동시 패키징하여 전달
       const otcCombinedStr = (currentConfirmedOtc && currentConfirmedOtc.length > 0)
         ? currentConfirmedOtc.map(function(o) {
@@ -1636,7 +2070,7 @@
       const payload = Object.assign({}, selectedPatient, {
         pharmacy_visit_date: visitDate,
         prescribing_doctor: doctorName,
-        confirmed_meds: currentConfirmedMeds,
+        confirmed_meds: mappedConfirmedMeds,
         confirmed_otc: currentConfirmedOtc, // OCR/직접등록된 영양제 목록 전달
         supple_names: otcCombinedStr,        // reply.html 호환용 문자열 동기화
         is_proxy: isProxy ? 'yes' : 'no',
@@ -1645,9 +2079,44 @@
         dietary_habits: dietaryHabits
       });
 
-      sessionStorage.setItem('selected_patient_intake', JSON.stringify(payload));
-      localStorage.setItem('selected_patient_intake', JSON.stringify(payload));
-      window.open('reply.html', '_blank');
+      // 4중 전송 파이프라인 (메모리, sessionStorage, localStorage, URL Hash)
+      // 1) window.__LATEST_PATIENT_INTAKE__ (메모리 파이프라인: 원본 photos 보존)
+      window.__LATEST_PATIENT_INTAKE__ = payload;
+
+      // 2 & 3) Storage & Hash 전송용 경량화 복제본 (QuotaExceededError 및 URI Too Long 원천 방어)
+      // 대용량 Base64 사진(photos)만 []로 비우고, 의약품 메타데이터 및 식약처 imgUrl은 100% 온전히 전송
+      const lightweightPayload = Object.assign({}, payload, { photos: [] });
+      const serializedLight = JSON.stringify(lightweightPayload);
+
+      try {
+        sessionStorage.setItem('selected_patient_intake', serializedLight);
+      } catch (e) {
+        console.warn("sessionStorage 저장 실패:", e);
+      }
+
+      try {
+        localStorage.setItem('selected_patient_intake', serializedLight);
+      } catch (e) {
+        console.warn("localStorage 저장 실패:", e);
+      }
+
+      // 4) URL Hash 파이프라인 (reply.html#data=...) 안전 구성
+      let targetUrl = 'reply.html';
+      try {
+        const hashData = encodeURIComponent(serializedLight);
+        if (hashData.length < 120000) {
+          targetUrl = 'reply.html#data=' + hashData;
+        }
+      } catch (e) {
+        console.warn("URL Hash 인코딩 실패, 기본 URL 사용:", e);
+      }
+
+      const replyWindow = window.open(targetUrl, '_blank');
+      if (replyWindow) {
+        try {
+          replyWindow.__LATEST_PATIENT_INTAKE__ = payload;
+        } catch (e) {}
+      }
     }
 
     async function toggleStatus(id, currentStatus) {
@@ -1691,6 +2160,8 @@
     window.resetGeminiApiKey = resetGeminiApiKey;
     window.handleTimingSelectChange = handleTimingSelectChange;
     window.resetPatientDraft = resetPatientDraft;
+    window.crossValidateWithPillDb = crossValidateWithPillDb;
+    window.selectPillCandidate = selectPillCandidate;
 
     // ========================================================
     // 환자 수정 실시간 감지 및 상세 모달 피드백
