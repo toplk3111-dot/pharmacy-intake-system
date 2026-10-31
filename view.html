@@ -1,0 +1,799 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>온누리정문약국 맞춤 복약 분석 리포트</title>
+  
+  <!-- Pretendard 웹폰트 -->
+  <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Supabase JS v2 CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Pretendard', 'ui-sans-serif', 'system-ui', '-apple-system', 'sans-serif'],
+            mono: ['Pretendard', 'monospace']
+          },
+          colors: {
+            brand: {
+              dark: '#202A3A',
+              sub: '#536174',
+              primary: '#4F46E5',
+              soft: '#F3F4FF',
+              border: '#E2E8F0',
+              alert: '#C62828'
+            }
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    body {
+      font-family: 'Pretendard', sans-serif;
+      word-break: keep-all;
+      background-color: #F8FAFC;
+      color: #202A3A;
+      -webkit-tap-highlight-color: transparent;
+    }
+    
+    /* 글자 크기 대폭 확대: 모든 Tailwind 고정 픽셀 클래스 강제 스케일업 */
+    body.large-font-active #mainScrollFeed {
+      zoom: 1.15;
+    }
+    @supports not (zoom: 1.15) {
+      body.large-font-active #mainScrollFeed {
+        transform: scale(1.08);
+        transform-origin: top center;
+      }
+    }
+    body.large-font-active #mainScrollFeed p,
+    body.large-font-active #mainScrollFeed div,
+    body.large-font-active #mainScrollFeed span {
+      line-height: 1.75 !important;
+    }
+
+    /* 카드별 보기: 뷰포트 피드 스냅 정상화 */
+    html.snap-view-active, body.snap-view-active {
+      scroll-snap-type: y proximity !important;
+      scroll-behavior: smooth !important;
+    }
+    .snap-view-active .toss-chapter-card {
+      scroll-snap-align: start !important;
+      scroll-margin-top: 108px !important;
+      margin-bottom: 2.5rem !important;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1) !important;
+    }
+    .toss-chapter-card {
+      scroll-margin-top: 108px;
+    }
+
+    /* 복약 시간표 빈시간대모두보기 바 완전 제거 및 테이블 상단 라운드 보정 */
+    #chapter_2 button[onclick*="toggleTimetableExpand"],
+    #chapter_2 .bg-indigo-50\/60 {
+      display: none !important;
+    }
+    #chapter_2 table {
+      border-top-left-radius: 0.75rem !important;
+      border-top-right-radius: 0.75rem !important;
+    }
+
+    /* Q1 칩 너비 제한 및 좌측 텍스트 줄바꿈 방어 */
+    #chapter_3 #card_q1 summary #pv_c1_summary_chip {
+      max-width: 100px !important;
+      text-overflow: ellipsis !important;
+      overflow: hidden !important;
+      white-space: nowrap !important;
+      flex-shrink: 0 !important;
+    }
+
+    /* A4 인쇄 스타일 */
+    @media print {
+      .no-print { display: none !important; }
+      body, .snap-view-active {
+        overflow: visible !important;
+        height: auto !important;
+        background: white !important;
+      }
+      .toss-chapter-card {
+        scroll-snap-align: none !important;
+        min-height: auto !important;
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+        margin-bottom: 2rem !important;
+      }
+    }
+    
+    /* 부드러운 스크롤 */
+    html {
+      scroll-behavior: smooth;
+    }
+
+    /* 복약하지 않는 빈 시간대/열 자동 숨김 */
+    .timetable-empty-row {
+      display: none !important;
+    }
+    .timetable-empty-col {
+      display: none !important;
+    }
+    #pv_timeline_cards.timetable-expanded .timetable-empty-row {
+      display: table-row !important;
+    }
+    #pv_timeline_cards.timetable-expanded .timetable-empty-col {
+      display: table-cell !important;
+    }
+    /* 모바일 터치 가로스크롤 감도 향상 */
+    .overflow-x-auto {
+      -webkit-overflow-scrolling: touch;
+    }
+    #pillHoverTooltip {
+      z-index: 9999;
+    }
+  </style>
+</head>
+<body class="antialiased min-h-screen flex flex-col justify-between selection:bg-indigo-100 selection:text-indigo-900">
+
+  <!-- ========================================================================= -->
+  <!-- 1. 로딩 인디케이터 (#loadingSpinner) -->
+  <!-- ========================================================================= -->
+  <div id="loadingSpinner" class="fixed inset-0 bg-white z-50 flex flex-col items-center justify-center p-6 space-y-4">
+    <div class="w-10 h-10 border-4 border-indigo-200 border-t-[#4F46E5] rounded-full animate-spin"></div>
+    <p class="text-sm font-bold text-slate-700 animate-pulse">온누리정문약국 복약 분석 리포트 확인 중...</p>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- 2. 에러 및 대기 안내 카드 (#errorContainer) -->
+  <!-- ========================================================================= -->
+  <div id="errorContainer" class="hidden min-h-screen flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl border border-slate-200 p-6 sm:p-8 max-w-sm w-full text-center space-y-4 shadow-sm">
+      <div class="w-12 h-12 rounded-full bg-indigo-50 text-[#4F46E5] mx-auto flex items-center justify-center font-bold text-xl">ℹ️</div>
+      <h3 class="text-lg font-extrabold text-slate-900" id="errorTitle">안내</h3>
+      <p class="text-sm text-slate-600 leading-relaxed" id="errorMessage">리포트 정보를 불러올 수 없습니다.</p>
+      <a href="tel:031-000-0000" class="inline-block w-full py-3 bg-[#202A3A] text-white font-bold rounded-xl text-sm transition hover:bg-slate-800">
+        약국으로 문의하기
+      </a>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- 3. 생년월일 6자리 개인정보 본인확인 게이트 (#authGateContainer) -->
+  <!-- ========================================================================= -->
+  <div id="authGateContainer" class="hidden min-h-screen flex items-center justify-center p-4 bg-slate-100/60">
+    <div class="bg-white rounded-3xl border border-slate-200/80 p-6 sm:p-8 max-w-md w-full text-left space-y-6 shadow-xl">
+      <div class="flex items-center gap-2">
+        <span class="w-2.5 h-2.5 rounded-full bg-[#4F46E5]"></span>
+        <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">온누리정문약국 안심 열람</span>
+      </div>
+
+      <div class="space-y-1.5">
+        <h2 class="text-xl font-extrabold text-[#202A3A]">
+          <span id="gatePatientName" class="text-[#4F46E5]">환자</span> 님 맞춤 복약 분석 리포트
+        </h2>
+        <p class="text-xs sm:text-sm text-[#536174] leading-relaxed break-keep">
+          소중한 건강 및 처방 정보 보호를 위해 <strong>생년월일 6자리</strong>를 입력해 주십시오.
+        </p>
+      </div>
+
+      <div class="space-y-3">
+        <label class="block text-xs font-extrabold text-[#202A3A]">생년월일 6자리 (예: 680204)</label>
+        <div class="relative">
+          <input 
+            type="text" 
+            id="birthInput" 
+            inputmode="numeric" 
+            maxlength="6" 
+            placeholder="YYMMDD"
+            class="w-full bg-slate-50 border-2 border-slate-200 focus:border-[#4F46E5] rounded-2xl py-3.5 px-4 text-center font-mono text-2xl font-black tracking-widest text-slate-900 focus:outline-none transition" 
+          />
+        </div>
+        <p id="gateErrorText" class="text-xs font-bold text-[#C62828] hidden text-center"></p>
+      </div>
+
+      <button 
+        type="button" 
+        onclick="verifyBirthAuth()" 
+        class="w-full py-4 bg-[#4F46E5] hover:bg-indigo-600 text-white font-extrabold rounded-2xl text-base shadow-md shadow-indigo-100 transition active:scale-[0.99]"
+      >
+        리포트 안전하게 열람하기
+      </button>
+
+      <div class="text-center pt-2">
+        <a href="tel:031-000-0000" class="text-xs font-semibold text-slate-400 hover:text-slate-600">
+          생년월일 확인이 어려우신가요? 약국 전화 문의
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- 4. 토스 피드형 모바일 리포트 뷰어 본문 (#reportContainer) -->
+  <!-- ========================================================================= -->
+  <div id="reportContainer" class="hidden flex-1 flex flex-col w-full">
+    
+    <!-- 최상단 고정 헤더 바 (Sticky Top) -->
+    <header class="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-[#E2E8F0] px-4 py-3 flex items-center justify-between no-print">
+      <div class="flex items-center gap-2">
+        <span class="w-6 h-6 rounded-lg bg-[#4F46E5] text-white flex items-center justify-center text-xs font-black">Rx</span>
+        <span class="text-sm font-extrabold text-[#202A3A]">온누리정문약국</span>
+      </div>
+      <div class="flex items-center gap-1.5">
+        <!-- 글자 크기 조절 토글 -->
+        <button type="button" onclick="toggleFontSize()" id="btnFontToggle" class="px-2.5 py-1 text-xs font-bold rounded-lg border border-slate-200 text-slate-600 bg-slate-50 hover:bg-slate-100 transition">
+          글자: 보통
+        </button>
+        <!-- 뷰 모드 조절 (카드별 보기 vs 모아보기) -->
+        <button type="button" onclick="toggleViewMode()" id="btnViewToggle" class="px-2.5 py-1 text-xs font-bold rounded-lg border border-slate-300 text-slate-700 bg-white hover:bg-slate-50 transition">
+          카드별 보기
+        </button>
+      </div>
+    </header>
+
+    <!-- 상단 5대 캡슐 알약 인디케이터 (Sticky Top 52px, 중앙 정렬 및 가시성/터치 영역 확대) -->
+    <nav id="stepperNav" class="sticky top-[53px] z-40 bg-white/95 backdrop-blur-md border-b border-[#E2E8F0] px-2 py-2.5 overflow-x-auto no-scrollbar flex items-center justify-start sm:justify-center gap-2 no-print shadow-xs">
+      <div class="flex items-center gap-1.5 sm:gap-2.5 mx-auto shrink-0">
+        <button type="button" onclick="scrollToChapter(1)" class="capsule-step px-4 py-2 rounded-full text-xs sm:text-[13px] font-extrabold whitespace-nowrap transition bg-[#4F46E5] text-white shadow-xs" data-target="1">
+          1. 요약
+        </button>
+        <button type="button" onclick="scrollToChapter(2)" class="capsule-step px-4 py-2 rounded-full text-xs sm:text-[13px] font-extrabold whitespace-nowrap transition bg-slate-100 text-[#536174] hover:bg-slate-200" data-target="2">
+          2. 시간표
+        </button>
+        <button type="button" onclick="scrollToChapter(3)" class="capsule-step px-4 py-2 rounded-full text-xs sm:text-[13px] font-extrabold whitespace-nowrap transition bg-slate-100 text-[#536174] hover:bg-slate-200" data-target="3">
+          3. 맞춤솔루션
+        </button>
+        <button type="button" onclick="scrollToChapter(4)" class="capsule-step px-4 py-2 rounded-full text-xs sm:text-[13px] font-extrabold whitespace-nowrap transition bg-slate-100 text-[#536174] hover:bg-slate-200" data-target="4">
+          4. 진료실메모
+        </button>
+        <button type="button" onclick="scrollToChapter(5)" class="capsule-step px-4 py-2 rounded-full text-xs sm:text-[13px] font-extrabold whitespace-nowrap transition bg-slate-100 text-[#536174] hover:bg-slate-200" data-target="5">
+          5. 학술근거
+        </button>
+      </div>
+    </nav>
+
+    <!-- 메인 챕터 피드 래퍼 -->
+    <main id="mainScrollFeed" class="flex-1 w-full max-w-[540px] mx-auto p-4 sm:p-5 space-y-6 pb-28">
+      
+      <!-- CHAPTER 1: 안심 요약 카드 -->
+      <section id="chapter_1" data-step="1" class="toss-chapter-card bg-white rounded-2xl border border-[#E2E8F0] p-4 sm:p-6 shadow-sm space-y-5">
+        <div id="slot_header"></div>
+        <div id="slot_traffic_box"></div>
+        <div id="slot_blockquote"></div>
+      </section>
+
+      <!-- CHAPTER 2: 01 복약 시간표 카드 -->
+      <section id="chapter_2" data-step="2" class="toss-chapter-card bg-white rounded-2xl border border-[#E2E8F0] p-4 sm:p-6 shadow-sm space-y-4">
+        <div id="slot_section_01"></div>
+      </section>
+
+      <!-- CHAPTER 3: 02 맞춤솔루션 카드 (1-Pick + Q1~Q5 원형 결속) -->
+      <section id="chapter_3" data-step="3" class="toss-chapter-card bg-white rounded-2xl border border-[#E2E8F0] p-4 sm:p-6 shadow-sm space-y-4">
+        <div id="slot_section_02"></div>
+      </section>
+
+      <!-- CHAPTER 4: 03 진료실메모 & 응급 가이드 카드 -->
+      <section id="chapter_4" data-step="4" class="toss-chapter-card bg-white rounded-2xl border border-[#E2E8F0] p-4 sm:p-6 shadow-sm space-y-4">
+        <div id="slot_section_03"></div>
+        <div id="slot_red_flag"></div>
+      </section>
+
+      <!-- CHAPTER 5: 04 학술근거 & 법적 고지 카드 -->
+      <section id="chapter_5" data-step="5" class="toss-chapter-card bg-white rounded-2xl border border-[#E2E8F0] p-4 sm:p-6 shadow-sm space-y-4 text-xs sm:text-sm text-[#536174]">
+        <div id="slot_section_04"></div>
+      </section>
+
+    </main>
+
+    <!-- 하단 토스형 고정 엄지 스텝 독 (Sticky Thumb Stepper Dock) -->
+    <footer class="fixed bottom-0 left-0 right-0 z-50 bg-white/95 backdrop-blur-md border-t border-[#E2E8F0] px-4 py-3 no-print">
+      <div class="max-w-[540px] mx-auto flex items-center justify-between gap-3">
+        <button type="button" onclick="prevChapter()" id="btnPrevStep" class="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-700 font-bold text-xs hover:bg-slate-50 transition shrink-0">
+          ‹ 이전
+        </button>
+
+        <div class="flex-1 text-center">
+          <div class="text-xs font-black text-[#202A3A]">
+            STEP <span id="dockStepNum" class="text-[#4F46E5]">1</span> / 5 · <span id="dockStepTitle">안심 요약</span>
+          </div>
+          <!-- 진행도 인디케이터 바 -->
+          <div class="w-full bg-slate-100 h-1.5 rounded-full mt-1.5 overflow-hidden">
+            <div id="dockProgressBar" class="bg-[#4F46E5] h-full transition-all duration-300" style="width: 20%;"></div>
+          </div>
+        </div>
+
+        <button type="button" onclick="nextChapter()" id="btnNextStep" class="px-4 py-2.5 rounded-xl bg-[#4F46E5] hover:bg-indigo-600 text-white font-extrabold text-xs transition shrink-0 shadow-sm">
+          다음 ›
+        </button>
+      </div>
+    </footer>
+
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- 5. 식약처 낱알식별 모달 (#pillDetailModal) -->
+  <!-- ========================================================================= -->
+  <div id="pillDetailModal" class="fixed inset-0 bg-slate-950/75 backdrop-blur-xs z-50 hidden flex items-center justify-center p-4 no-print" onclick="closePillModal()">
+    <div class="bg-white rounded-2xl max-w-sm w-full p-5 space-y-4 shadow-2xl border border-slate-200" onclick="event.stopPropagation()">
+      <div class="flex items-center justify-between pb-2 border-b border-slate-100">
+        <h4 id="pillModalName" class="font-extrabold text-base text-[#202A3A] truncate">알약 식별 상세</h4>
+        <button type="button" onclick="closePillModal()" class="text-slate-400 hover:text-slate-700 font-bold text-lg">✕</button>
+      </div>
+      <div class="space-y-3 text-left">
+        <div class="w-full h-40 bg-slate-100 rounded-xl overflow-hidden flex items-center justify-center border border-slate-200">
+          <img id="pillModalImg" src="" alt="알약 사진" referrerpolicy="no-referrer" class="w-full h-full object-contain p-2" onerror="this.onerror=null; this.src='https://placehold.co/400x250/F8FAFC/536174?text=No+Image';" />
+        </div>
+        <div class="grid grid-cols-2 gap-2 text-xs bg-slate-50 p-3 rounded-xl border border-slate-100">
+          <div><span class="text-slate-400 font-bold block">성상:</span> <span id="pillModalChart" class="font-semibold text-slate-800">-</span></div>
+          <div><span class="text-slate-400 font-bold block">제형/모양:</span> <span id="pillModalShape" class="font-semibold text-slate-800">-</span></div>
+          <div><span class="text-slate-400 font-bold block">식별표기:</span> <span id="pillModalImprint" class="font-mono font-bold text-[#4F46E5]">-</span></div>
+          <div><span class="text-slate-400 font-bold block">품목기준코드:</span> <span id="pillModalSeq" class="font-mono text-slate-600">-</span></div>
+        </div>
+      </div>
+      <button type="button" onclick="closePillModal()" class="w-full py-2.5 bg-slate-900 text-white font-bold rounded-xl text-xs hover:bg-slate-800 transition">
+        확인 완료
+      </button>
+    </div>
+  </div>
+
+  <!-- ========================================================================= -->
+  <!-- 6. 클라이언트 구동 스크립트 -->
+  <!-- ========================================================================= -->
+  <script>
+    const SUPABASE_URL = "https://qyvrlojwagbjjmcaaffe.supabase.co";
+    const SUPABASE_ANON_KEY = "sb_publishable_Sk7CTdSeRnBTYeK-9Key_g_msHrna8I";
+    const supabaseClient = (typeof window !== 'undefined' && window.supabase)
+      ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+      : null;
+
+    let loadedIntakeData = null;
+    let publishedPackage = null;
+    let currentChapter = 1;
+    let isLargeFont = false;
+    let isCardSnapMode = false;
+
+    const CHAPTER_TITLES = {
+      1: "안심 요약",
+      2: "01 복약시간표",
+      3: "02 맞춤솔루션",
+      4: "03 진료실메모",
+      5: "04 학술근거"
+    };
+
+    // 생년월일 정규화 (YYYY-MM-DD, YYMMDD 등 -> 6자리 YYMMDD)
+    function normalizeBirth6(rawStr) {
+      if (!rawStr) return '';
+      const digits = String(rawStr).replace(/[^0-9]/g, '');
+      if (digits.length === 8) {
+        return digits.substring(2); // 19680204 -> 680204
+      }
+      if (digits.length === 6) {
+        return digits;
+      }
+      return digits.slice(-6);
+    }
+
+    // 1. 초기 로드
+    window.addEventListener('DOMContentLoaded', async () => {
+      const urlParams = new URLSearchParams(window.location.search);
+      const intakeId = urlParams.get('id');
+
+      if (!intakeId) {
+        showError('유효하지 않은 링크', '회신서 고유 번호가 누락되었습니다. 전달받으신 링크를 다시 확인해 주십시오.');
+        return;
+      }
+
+      try {
+        if (!supabaseClient) throw new Error('데이터베이스 클라이언트를 초기화할 수 없습니다.');
+
+        const { data, error } = await supabaseClient
+          .from('intakes')
+          .select('*')
+          .eq('id', intakeId)
+          .single();
+
+        if (error || !data) {
+          showError('리포트 조회 실패', '해당하는 복약 분석 리포트를 찾을 수 없습니다.');
+          return;
+        }
+
+        loadedIntakeData = data;
+
+        // 회신서 페이로드 파싱 (reply_payload 우선, pharmacist_memo 폴백)
+        if (data.reply_payload && typeof data.reply_payload === 'object') {
+          publishedPackage = data.reply_payload;
+        } else if (data.pharmacist_memo) {
+          try {
+            publishedPackage = JSON.parse(data.pharmacist_memo);
+          } catch(e) {
+            console.warn('pharmacist_memo JSON 파싱 실패');
+          }
+        }
+
+        if (!publishedPackage || !publishedPackage.previewHtml) {
+          showError('작성 진행 중 안내', '현재 담당 약사가 리포트를 꼼꼼하게 검수 및 작성 중입니다. 작성이 완료되면 안내 메시지가 전송됩니다.');
+          return;
+        }
+
+        // 인증 상태 체크 (sessionStorage)
+        const isAuth = sessionStorage.getItem('view_auth_' + intakeId);
+        if (isAuth === 'true') {
+          renderReportView();
+        } else {
+          showAuthGate(data.patient_name);
+        }
+
+      } catch (err) {
+        console.error(err);
+        showError('시스템 연결 안내', '일시적인 네트워크 장애로 리포트를 불러올 수 없습니다: ' + err.message);
+      }
+    });
+
+    // 2. 화면 제어 유틸
+    function showError(title, message) {
+      document.getElementById('loadingSpinner').classList.add('hidden');
+      document.getElementById('authGateContainer').classList.add('hidden');
+      document.getElementById('reportContainer').classList.add('hidden');
+      
+      const errBox = document.getElementById('errorContainer');
+      document.getElementById('errorTitle').textContent = title;
+      document.getElementById('errorMessage').textContent = message;
+      errBox.classList.remove('hidden');
+    }
+
+    function showAuthGate(patientName) {
+      document.getElementById('loadingSpinner').classList.add('hidden');
+      document.getElementById('errorContainer').classList.add('hidden');
+      document.getElementById('reportContainer').classList.add('hidden');
+      
+      const gate = document.getElementById('authGateContainer');
+      const nameEl = document.getElementById('gatePatientName');
+      if (nameEl && patientName) nameEl.textContent = patientName;
+      gate.classList.remove('hidden');
+
+      const birthInput = document.getElementById('birthInput');
+      birthInput.focus();
+      birthInput.addEventListener('keyup', (e) => {
+        if (e.target.value.length === 6) {
+          verifyBirthAuth();
+        }
+      });
+    }
+
+    function verifyBirthAuth() {
+      const inputEl = document.getElementById('birthInput');
+      const errEl = document.getElementById('gateErrorText');
+      const inputVal = (inputEl.value || '').trim();
+
+      if (inputVal.length !== 6) {
+        errEl.textContent = '생년월일 6자리를 모두 입력해 주십시오.';
+        errEl.classList.remove('hidden');
+        return;
+      }
+
+      const expectedBirth = normalizeBirth6(loadedIntakeData.patient_birth);
+      const userBirth = normalizeBirth6(inputVal);
+
+      if (expectedBirth && userBirth !== expectedBirth) {
+        errEl.textContent = '생년월일이 일치하지 않습니다. 다시 확인해 주십시오.';
+        errEl.classList.remove('hidden');
+        inputEl.value = '';
+        inputEl.focus();
+        return;
+      }
+
+      // 인증 성공
+      sessionStorage.setItem('view_auth_' + loadedIntakeData.id, 'true');
+      inputEl.blur();
+      renderReportView();
+    }
+
+    // 3. 무손실 DOM Partitioning 어댑터 렌더러
+    function renderReportView(pkgArg) {
+      document.getElementById('loadingSpinner').classList.add('hidden');
+      document.getElementById('authGateContainer').classList.add('hidden');
+      document.getElementById('errorContainer').classList.add('hidden');
+      document.getElementById('reportContainer').classList.remove('hidden');
+
+      const pkg = pkgArg || publishedPackage || window.publishedPackage || {};
+
+      // 가상 샌드박스 파서에 수신된 previewHtml 주입
+      const parserDiv = document.createElement('div');
+      parserDiv.innerHTML = pkg.previewHtml || '';
+
+      // 요소 추출 및 슬롯 배치
+      // Chapter 1
+      const headerEl = parserDiv.querySelector('header');
+      const trafficBoxEl = parserDiv.querySelector('#pv_traffic_box');
+      const blockquoteEl = parserDiv.querySelector('blockquote');
+
+      if (headerEl) document.getElementById('slot_header').appendChild(headerEl);
+      if (trafficBoxEl) document.getElementById('slot_traffic_box').appendChild(trafficBoxEl);
+      if (blockquoteEl) document.getElementById('slot_blockquote').appendChild(blockquoteEl);
+
+      // 본문 내 section 태그 순서 수집
+      const sections = parserDiv.querySelectorAll('section');
+      // [0]: 01 복약시간표, [1]: 02 맞춤솔루션, [2]: 03 진료실메모, [3]: 응급기준, [4]: 04 학술근거
+      if (sections[0]) {
+        // 상단 불필요한 보더 및 패딩 제거하여 공백 완전히 제거
+        sections[0].classList.remove('border-t', 'pt-2');
+        sections[0].style.borderTop = 'none';
+        sections[0].style.paddingTop = '0';
+
+        // 1. 시간표 상단 빈시간대 토글바 마크업 전수 삭제
+        const expandBtn = sections[0].querySelector('button[onclick*="toggleTimetableExpand"]');
+        if (expandBtn) {
+          const barWrapper = expandBtn.closest('.bg-indigo-50\\/60') || expandBtn.closest('div');
+          if (barWrapper) barWrapper.remove();
+        }
+        const tbl = sections[0].querySelector('table');
+        if (tbl) {
+          tbl.classList.remove('rounded-b-xl');
+          tbl.classList.add('rounded-xl');
+        }
+
+        // 2. 테이블 바로 아래에 작은 글씨 안내문구 즉시 삽입 (공백 완전 제거)
+        const timelineCards = sections[0].querySelector('#pv_timeline_cards') || sections[0].querySelector('table');
+        const guideEl = document.createElement('div');
+        guideEl.className = 'text-[11px] sm:text-xs text-[#536174] text-center mt-2 mb-1 font-medium flex items-center justify-center gap-1.5';
+        guideEl.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0"></span><span>약물을 클릭하시면 사진이 확대됩니다.</span>';
+
+        if (timelineCards) {
+          timelineCards.insertAdjacentElement('afterend', guideEl);
+        } else {
+          sections[0].appendChild(guideEl);
+        }
+
+        document.getElementById('slot_section_01').appendChild(sections[0]);
+      }
+      if (sections[1]) document.getElementById('slot_section_02').appendChild(sections[1]);
+      if (sections[2]) document.getElementById('slot_section_03').appendChild(sections[2]);
+      if (sections[3]) document.getElementById('slot_red_flag').appendChild(sections[3]);
+      if (sections[4]) document.getElementById('slot_section_04').appendChild(sections[4]);
+
+      // Chapter 3 아코디언 기본값 제어: 1순위 질문(card_custom)만 열고 Q1~Q5는 닫힘 유지
+      const cardCustom = document.getElementById('card_custom');
+      if (cardCustom) cardCustom.open = true;
+      ['card_q1', 'card_q2', 'card_q3', 'card_q4', 'card_q5'].forEach(id => {
+        const c = document.getElementById(id);
+        if (c) c.open = false;
+      });
+
+      // 모든 알약 칩에 클릭 이벤트 바인딩
+      bindPillChipEvents();
+
+      // 스크롤 감시 및 챕터 초기화
+      setupIntersectionObserver();
+      updateChapterUI(1);
+    }
+
+    // 4. 알약 인터랙션 모달 연동 (이미지 403 방어 및 이벤트 격리)
+    function bindPillChipEvents() {
+      const chips = document.querySelectorAll('.pill-bridge-chip, [data-pill-name]');
+      chips.forEach(chip => {
+        chip.style.cursor = 'pointer';
+        chip.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const pillName = chip.getAttribute('data-pill-name') || chip.innerText.trim();
+          const imgUrl = chip.getAttribute('data-img') || '';
+          const chart = chip.getAttribute('data-chart') || '상세 정보 참조';
+          const shape = chip.getAttribute('data-shape') || '원형/장방형';
+          const imprint = chip.getAttribute('data-imprint') || '식별표기';
+          const seq = chip.getAttribute('data-seq') || '-';
+
+          openPillModal(pillName, imgUrl, chart, shape, imprint, seq);
+        });
+      });
+    }
+
+    function openPillModal(name, img, chart, shape, imprint, seq) {
+      document.getElementById('pillModalName').textContent = name;
+      const imgEl = document.getElementById('pillModalImg');
+      imgEl.src = img || 'https://placehold.co/400x250/F8FAFC/536174?text=No+Image';
+      document.getElementById('pillModalChart').textContent = chart;
+      document.getElementById('pillModalShape').textContent = shape;
+      document.getElementById('pillModalImprint').textContent = imprint;
+      document.getElementById('pillModalSeq').textContent = seq;
+      document.getElementById('pillDetailModal').classList.remove('hidden');
+    }
+
+    function closePillModal() {
+      document.getElementById('pillDetailModal').classList.add('hidden');
+    }
+
+    // 5. 토스 스텝퍼 내비게이션 & UI 상태 머신
+    function updateChapterUI(step) {
+      currentChapter = step;
+      document.getElementById('dockStepNum').textContent = step;
+      document.getElementById('dockStepTitle').textContent = CHAPTER_TITLES[step] || '';
+      document.getElementById('dockProgressBar').style.width = (step * 20) + '%';
+
+      // 캡슐 인디케이터 활성화 하이라이트 (크기 및 가시성 확대 유지)
+      document.querySelectorAll('.capsule-step').forEach(btn => {
+        const target = parseInt(btn.getAttribute('data-target'));
+        if (target === step) {
+          btn.className = 'capsule-step px-4 py-2 rounded-full text-xs sm:text-[13px] font-extrabold whitespace-nowrap transition bg-[#4F46E5] text-white shadow-xs';
+        } else {
+          btn.className = 'capsule-step px-4 py-2 rounded-full text-xs sm:text-[13px] font-extrabold whitespace-nowrap transition bg-slate-100 text-[#536174] hover:bg-slate-200';
+        }
+      });
+
+      // 하단 버튼 텍스트 변경 (마지막 단계 시 약국 전화 연결로 전환)
+      const btnNext = document.getElementById('btnNextStep');
+      const btnPrev = document.getElementById('btnPrevStep');
+      
+      btnPrev.disabled = (step === 1);
+      btnPrev.style.opacity = (step === 1) ? '0.4' : '1.0';
+
+      if (step === 5) {
+        btnNext.textContent = '약국 문의 📞';
+        btnNext.onclick = () => { window.location.href = 'tel:031-000-0000'; };
+      } else {
+        btnNext.textContent = '다음 ›';
+        btnNext.onclick = nextChapter;
+      }
+    }
+
+    function scrollToChapter(step) {
+      const targetEl = document.getElementById('chapter_' + step);
+      if (targetEl) {
+        targetEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        updateChapterUI(step);
+      }
+    }
+
+    function nextChapter() {
+      if (currentChapter < 5) {
+        scrollToChapter(currentChapter + 1);
+      }
+    }
+
+    function prevChapter() {
+      if (currentChapter > 1) {
+        scrollToChapter(currentChapter - 1);
+      }
+    }
+
+    function setupIntersectionObserver() {
+      const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) {
+            const step = parseInt(entry.target.getAttribute('data-step'));
+            if (step) updateChapterUI(step);
+          }
+        });
+      }, { threshold: 0.4 });
+
+      document.querySelectorAll('.toss-chapter-card').forEach(card => observer.observe(card));
+    }
+
+    // 6. 상단 헤더 기능: 글자 크기 조절 & 뷰 모드 토글
+    function toggleFontSize() {
+      isLargeFont = !isLargeFont;
+      const btn = document.getElementById('btnFontToggle');
+      if (isLargeFont) {
+        document.body.classList.add('large-font-active');
+        btn.textContent = '글자: 크게';
+        btn.className = 'px-2.5 py-1 text-xs font-bold rounded-lg border border-[#4F46E5] text-white bg-[#4F46E5] shadow-xs transition';
+      } else {
+        document.body.classList.remove('large-font-active');
+        btn.textContent = '글자: 보통';
+        btn.className = 'px-2.5 py-1 text-xs font-bold rounded-lg border border-slate-200 text-slate-600 bg-slate-50 hover:bg-slate-100 transition';
+      }
+    }
+
+    function toggleViewMode() {
+      isCardSnapMode = !isCardSnapMode;
+      const btn = document.getElementById('btnViewToggle');
+      const docEl = document.documentElement;
+      const body = document.body;
+
+      if (isCardSnapMode) {
+        docEl.classList.add('snap-view-active');
+        body.classList.add('snap-view-active');
+        btn.textContent = '모아보기';
+        btn.className = 'px-2.5 py-1 text-xs font-bold rounded-lg border border-[#4F46E5] text-white bg-[#4F46E5] shadow-xs transition';
+        scrollToChapter(currentChapter || 1);
+      } else {
+        docEl.classList.remove('snap-view-active');
+        body.classList.remove('snap-view-active');
+        btn.textContent = '카드별 보기';
+        btn.className = 'px-2.5 py-1 text-xs font-bold rounded-lg border border-slate-300 text-slate-700 bg-white hover:bg-slate-50 transition';
+      }
+    }
+
+    // =========================================================================
+    // 알약 호버 툴팁(PC) & 모달(모바일) 및 시간대 토글 핸들러
+    // =========================================================================
+    function getPrescribedMedByIndex(idx) {
+      const pkg = (typeof publishedPackage !== 'undefined' && publishedPackage) || window.publishedPackage;
+      if (pkg && pkg.state && Array.isArray(pkg.state.prescribedMeds)) {
+        return pkg.state.prescribedMeds[idx];
+      }
+      return null;
+    }
+
+    function showPillHoverTooltip(event, idx) {
+      const med = getPrescribedMedByIndex(idx);
+      if (!med) return;
+      const tooltip = document.getElementById('pillHoverTooltip');
+      if (!tooltip) return;
+
+      const medName = med.name || '의약품';
+      const imgTag = med.imgUrl 
+        ? `<img src="${med.imgUrl}" alt="${medName}" referrerpolicy="no-referrer" class="w-full h-full object-contain" onerror="this.src='https://placehold.co/100x60/F8FAFC/536174?text=Pill';" />`
+        : `<div class="text-xs text-slate-400 font-bold">알약 이미지</div>`;
+
+      tooltip.innerHTML = `
+        <div class="space-y-2 text-left">
+          <div class="flex items-center gap-2.5">
+            <div class="w-20 h-12 rounded-lg bg-slate-50 border border-slate-200 p-1 shrink-0 flex items-center justify-center overflow-hidden">
+              ${imgTag}
+            </div>
+            <div class="min-w-0 flex-1">
+              <div class="text-xs font-black text-[#202A3A] truncate">${medName}</div>
+              <div class="text-[11px] text-[#536174]">${med.dose || '1회 용량'}</div>
+            </div>
+          </div>
+          <div class="text-[11px] bg-slate-50 p-2 rounded-lg border border-slate-100 space-y-0.5 text-slate-600">
+            <div>식별: <strong class="text-[#4F46E5] font-mono">${med.imprint || '-'}</strong></div>
+            <div>제형: ${med.shape || '-'} · ${med.chart || '-'}</div>
+          </div>
+        </div>
+      `;
+
+      tooltip.classList.remove('hidden');
+      const x = event.clientX + 15;
+      const y = event.clientY + 15;
+      const maxX = window.innerWidth - 270;
+      tooltip.style.left = (x > maxX ? maxX : x) + 'px';
+      tooltip.style.top = y + 'px';
+    }
+
+    function hidePillHoverTooltip() {
+      const tooltip = document.getElementById('pillHoverTooltip');
+      if (tooltip) tooltip.classList.add('hidden');
+    }
+
+    function openPillDetailPopover(idx) {
+      const med = getPrescribedMedByIndex(idx);
+      if (!med) return;
+      openPillModal(
+        med.name || '알약 정보',
+        med.imgUrl || '',
+        med.chart || '정보 참조',
+        med.shape || '원형/장방형',
+        med.imprint || '식별표기',
+        med.itemSeq || '-'
+      );
+    }
+
+    let isTimetableManuallyExpanded = false;
+    function toggleTimetableExpand() {
+      isTimetableManuallyExpanded = !isTimetableManuallyExpanded;
+      const cards = document.getElementById('pv_timeline_cards');
+      if (cards) {
+        if (isTimetableManuallyExpanded) {
+          cards.classList.add('timetable-expanded');
+        } else {
+          cards.classList.remove('timetable-expanded');
+        }
+      }
+    }
+
+    window.showPillHoverTooltip = showPillHoverTooltip;
+    window.hidePillHoverTooltip = hidePillHoverTooltip;
+    window.openPillDetailPopover = openPillDetailPopover;
+    window.toggleTimetableExpand = toggleTimetableExpand;
+  </script>
+
+  <!-- 전역 플로팅 호버 툴팁 (#pillHoverTooltip) -->
+  <div id="pillHoverTooltip" class="fixed z-50 hidden pointer-events-none no-print bg-white border border-[#E2E8F0] shadow-xl rounded-xl p-3 w-64 transition-opacity duration-150"></div>
+</body>
+</html>
