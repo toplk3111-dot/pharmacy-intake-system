@@ -375,7 +375,7 @@
                 <label class="block text-slate-700 mb-1 font-bold text-xs">환자가 가장 궁금해한 질문 (1-Pick)</label>
                 <select id="in_patient_1pick_question" class="w-full border border-slate-300 rounded-lg p-2 font-semibold bg-white text-slate-800 text-xs" onchange="handleQuestionTypeChange()">
                   <option value="custom">환자 직접 작성 1-Pick 질문</option>
-                  <option value="q1">Q1. 내가 먹는 약은 얼마나 센 약인가요? (치료 단계)</option>
+                  <option value="q1">Q1. 내 약은 표준 진료 가이드라인상 어느 치료 단계인가요? (치료 단계)</option>
                   <option value="q2">Q2. 같이 먹으면 안 되는 것은 무엇인가요? (상호작용/음식)</option>
                   <option value="q3">Q3. 다른 약과 함께 먹어도 되나요? (병용 궁합)</option>
                   <option value="q4">Q4. 큰 부작용이 있나요? (이상반응/경고)</option>
@@ -445,6 +445,7 @@
               <span class="font-bold text-slate-900 block text-xs">이상반응(ADR) 판정 및 호소 증상 대처</span>
               <label class="block text-slate-600 mb-1 font-semibold text-xs">Q4. 큰 부작용이 있나요? (환자 호소 증상 인과성 및 안심 종결)</label>
               <textarea id="in_c4_answer" rows="3" class="w-full border border-slate-300 rounded-lg p-2 bg-slate-50 focus:bg-white text-slate-800 leading-relaxed text-xs" placeholder="**의심 약물명 ➔ 호소 증상명 연관 가능성**&#10;이어서 상세 설명과 대처법을 작성하세요."></textarea>
+              <input type="hidden" id="in_c4_level" value="2">
             </div>
 
  <!-- 3) 치료 단계 및 영양 케어 (Q1 & Q5) -->
@@ -487,25 +488,44 @@
             <div class="pt-3 border-t border-slate-200 space-y-2.5">
               <div class="flex items-center justify-between">
                 <span class="font-bold text-slate-900 block text-xs">24시간 복약 시간표 & 안심 FAQ</span>
-                <button type="button" onclick="addTimetableRow()" class="text-xs bg-slate-100 hover:bg-slate-200 px-2.5 py-1 rounded-md text-slate-700 font-medium">
-                  + 시간대 행 추가
+                <button type="button" onclick="autoGenerateTimetableFromMeds(true)" class="text-xs bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-[#4F46E5] font-bold px-2.5 py-1 rounded-md transition flex items-center gap-1 shadow-2xs">
+                  <span>⏱️ 시간표 자동 재배치</span>
                 </button>
               </div>
 
-              <div class="overflow-x-auto border border-slate-200 rounded-xl">
-                <table class="w-full text-left border-collapse text-xs">
-                  <thead>
-                    <tr class="bg-slate-50 border-b border-slate-200 text-slate-600 text-xs">
-                      <th class="py-2 px-2 w-24">시간대</th>
-                      <th class="py-2 px-2">복용 약물 및 영양제</th>
-                      <th class="py-2 px-2 w-20">1회량</th>
-                      <th class="py-2 px-2">복약 수칙</th>
-                      <th class="py-2 px-1.5 w-10 text-center">삭제</th>
-                    </tr>
-                  </thead>
-                  <tbody id="timetableBody" class="divide-y divide-slate-100"></tbody>
-                </table>
+              <!-- 복약 시간표 직관적 드래그 편집 안내 & 퀵 컨트롤러 -->
+              <div class="p-3 rounded-xl bg-indigo-50/70 border border-indigo-100 text-xs text-indigo-950 space-y-2">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-1.5 font-bold">
+                    <span class="w-2 h-2 rounded-full bg-[#4F46E5] animate-pulse"></span>
+                    <span>24시간 복약 시간표 실시간 스마트 드래그 편집</span>
+                  </div>
+                  <span class="text-[10px] bg-white text-indigo-700 font-extrabold px-2 py-0.5 rounded border border-indigo-200">우측 프리뷰 연동</span>
+                </div>
+                <p class="text-[11px] text-slate-600 leading-relaxed break-keep">
+                  우측 프리뷰 시간표에서 <strong>알약 및 영양제 카드를 마우스로 드래그하여 원하는 시간 칸으로 자유롭게 이동</strong>할 수 있습니다. Step 1의 처방약·영양제 정보가 변경되어도 수동 배치된 위치가 안전하게 보존됩니다.
+                </p>
               </div>
+              <!-- 레거시 텍스트 세부 편집 (필요 시에만 펼쳐보는 미세 조정 드로어) -->
+              <details class="text-xs border border-slate-200 rounded-lg p-2 bg-slate-50">
+                <summary class="font-semibold text-slate-600 cursor-pointer flex items-center justify-between select-none">
+                  <span>텍스트 기반 시간대 행 미세 수동 조정 (고급 옵션)</span>
+                  <span class="text-[10px] text-slate-400">클릭하여 펼치기 ▾</span>
+                </summary>
+                <div class="pt-2 overflow-x-auto">
+                  <table class="w-full text-left border-collapse text-xs bg-white rounded border border-slate-200">
+                    <thead>
+                      <tr class="bg-slate-100 text-slate-700 text-[11px]">
+                        <th class="py-1 px-1.5 w-20">시간대</th>
+                        <th class="py-1 px-1.5">배치 약물 및 영양제</th>
+                        <th class="py-1 px-1.5 w-16">1회량</th>
+                        <th class="py-1 px-1.5">복약 지침</th>
+                      </tr>
+                    </thead>
+                    <tbody id="timetableBody" class="divide-y divide-slate-100"></tbody>
+                  </table>
+                </div>
+              </details>
 
               <div class="pt-1">
                 <label class="block text-slate-600 mb-1 font-semibold text-xs">복약 안심 FAQ (환자 불안 해소 1줄 문장)</label>
@@ -812,12 +832,14 @@
               </style>
               <details id="card_q1" class="border border-[#E2E8F0] rounded-xl overflow-hidden group transition bg-white print-avoid-break">
                 <summary class="p-3.5 sm:p-4 min-h-[48px] bg-slate-50/70 text-base font-bold text-[#202A3A] cursor-pointer flex items-center justify-between gap-2 hover:bg-slate-100">
-                  <div class="flex items-center gap-1.5 flex-1 min-w-0 pr-1">
-                    <span class="text-xs font-mono font-extrabold text-[#4F46E5] shrink-0">Q1.</span>
-                    <span class="text-sm sm:text-base font-bold text-[#202A3A] leading-snug text-left truncate sm:whitespace-normal">내 약은 지금 얼마나 복용 중인가요? (치료 단계)</span>
+                  <div class="flex items-center gap-2 flex-1 min-w-0 pr-2">
+                    <span class="text-xs font-mono font-extrabold text-[#4F46E5] flex-shrink-0">Q1.</span>
+                    <span class="break-keep leading-tight text-left font-bold text-[#202A3A]">내 약은 표준 진료 가이드라인상 어느 치료 단계인가요? (치료 단계)</span>
                   </div>
-                  <div class="flex items-center gap-1.5 shrink-0">
-                    <span id="pv_c1_summary_chip" class="text-[11px] bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded-full font-bold max-w-[80px] sm:max-w-[100px] truncate shrink-0">📍 2단계</span>
+                  <div class="flex items-center gap-2 flex-shrink-0">
+                    <span id="pv_c1_summary_chip" class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-xs font-bold bg-slate-100 text-[#202A3A] border border-[#E2E8F0] whitespace-nowrap shrink-0 max-w-[100px] truncate">
+                      📍 2단계
+                    </span>
                     <span class="text-xs text-slate-400 group-open:rotate-180 transition font-mono">▼</span>
                   </div>
                 </summary>
@@ -2085,19 +2107,51 @@
       return /권장수칙|복약안내|대처방법|실천수칙|대처안내|생활가이드|복용수칙|권장행동|오늘의실천/.test(clean);
     }
 
-    // 불릿 키-값(• 항목명: 내용) 1줄을 좌측 배지 칩 + 우측 본문 2열 그리드(Key-Value Row)로 변환하는 헬퍼
-    // Argon 스타일: 권장 수칙/복약 안내/대처 방법 행은 bg-[#F3F4FF]/70 및 border-l-4 border-l-[#4F46E5]로 자동 하이라이트
+    // 불릿 키-값(• 항목명: 내용) 1건을 시각적 카드/행(Key-Value Card)으로 변환하는 헬퍼
+    // 모바일 100% 가로폭 친화적인 수직 카드 스택 구조 및 항목별 전용 테마 적용
     function buildKeyValueRowHtml(keyLabel, valText, isDarkBg, badgeCustomClass, rowCustomClass) {
-      var isAction = isActionKeyLabel(keyLabel);
-      var rowClass = rowCustomClass || (
+      var rawLabel = String(keyLabel || '').replace(/\*\*/g, '').trim();
+      var cleanK = rawLabel.replace(/\s+/g, '');
+
+      // 표준 항목명 레이블 정규화
+      var displayLabel = rawLabel;
+      if (/^핵심답변$/.test(cleanK)) displayLabel = '핵심 답변';
+      else if (/^작용원리$|^발생원리$|^체내원리$/.test(cleanK)) displayLabel = '작용 원리';
+      else if (/^권장수칙$|^복약수칙$|^실천수칙$/.test(cleanK)) displayLabel = '권장 수칙';
+      else if (/^대처방법$|^대처안내$/.test(cleanK)) displayLabel = '대처 방법';
+      else if (/^주의사항$|^주의대상$|^주의약물$/.test(cleanK)) displayLabel = '주의 사항';
+
+      var isAction = isActionKeyLabel(cleanK);
+      var isCore = /핵심답변|핵심요점|핵심결론|답변/.test(cleanK);
+      var isMechanism = /작용원리|발생원리|체내원리|기전|체내작용/.test(cleanK);
+      var isCaution = /주의사항|주의대상|주의약물|상호작용/.test(cleanK);
+
+      var cardBoxClass = rowCustomClass || (
         isAction
-          ? 'p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-start gap-2 sm:gap-4 text-left bg-[#F3F4FF]/70 border-l-4 border-l-[#4F46E5]'
-          : 'p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-start gap-2 sm:gap-4 text-left bg-white'
+          ? 'p-3.5 sm:p-4 rounded-xl text-left bg-[#F4F5FF] border border-indigo-200/90 shadow-2xs space-y-1.5'
+          : (isCore
+              ? 'p-3.5 sm:p-4 rounded-xl text-left bg-white border border-slate-200/90 shadow-2xs space-y-1.5'
+              : (isMechanism
+                  ? 'p-3.5 sm:p-4 rounded-xl text-left bg-slate-50/80 border border-slate-200/80 space-y-1.5'
+                  : (isCaution
+                      ? 'p-3.5 sm:p-4 rounded-xl text-left bg-amber-50/50 border border-amber-200/90 space-y-1.5'
+                      : 'p-3.5 sm:p-4 rounded-xl text-left bg-white border border-slate-200/80 space-y-1.5')
+                )
+            )
       );
+
       var chipClass = badgeCustomClass || (
         isAction
-          ? 'inline-flex items-center px-2.5 py-0.5 rounded-md text-xs sm:text-[13px] font-bold bg-[#4F46E5] text-white shrink-0 mt-0.5'
-          : 'inline-flex items-center px-2.5 py-0.5 rounded-md text-xs sm:text-[13px] font-bold bg-slate-100 text-[#202A3A] border border-slate-200/80 shrink-0 mt-0.5'
+          ? 'inline-flex items-center justify-center px-2.5 py-0.5 rounded-md text-xs sm:text-[13px] font-extrabold bg-[#4F46E5] text-white shrink-0 shadow-xs'
+          : (isCore
+              ? 'inline-flex items-center justify-center px-2.5 py-0.5 rounded-md text-xs sm:text-[13px] font-extrabold bg-[#1E293B] text-white shrink-0'
+              : (isMechanism
+                  ? 'inline-flex items-center justify-center px-2.5 py-0.5 rounded-md text-xs sm:text-[13px] font-bold bg-slate-200 text-slate-800 shrink-0'
+                  : (isCaution
+                      ? 'inline-flex items-center justify-center px-2.5 py-0.5 rounded-md text-xs sm:text-[13px] font-extrabold bg-amber-600 text-white shrink-0'
+                      : 'inline-flex items-center justify-center px-2.5 py-0.5 rounded-md text-xs sm:text-[13px] font-bold bg-slate-100 text-[#202A3A] border border-slate-200/80 shrink-0')
+                )
+            )
       );
 
       // ' / ' 구분자가 있는 복수 약물 항목은 줄바꿈하여 가독성 극대화 (단, (AST/ALT), 5/20mg 같은 괄호 및 단위 표기는 보존)
@@ -2113,9 +2167,11 @@
       }
 
       return (
-        '<div class="' + rowClass + '">' +
-          '<span class="' + chipClass + '">' + escapeHtml(keyLabel) + '</span>' +
-          '<div class="text-[16px] sm:text-[17px] text-[#202A3A] leading-[1.7] flex-1 text-left break-keep">' +
+        '<div class="' + cardBoxClass + '">' +
+          '<div class="flex items-center gap-1.5">' +
+            '<span class="' + chipClass + '">' + escapeHtml(displayLabel) + '</span>' +
+          '</div>' +
+          '<div class="text-[15px] sm:text-[16px] text-[#202A3A] leading-[1.7] text-left break-keep">' +
             bodyHtml +
           '</div>' +
         '</div>'
@@ -2222,26 +2278,86 @@
         '</div>';
       }
 
+      // 불필요한 단독 별표(**) 및 콜론 찌꺼기 정제 헬퍼
+      function cleanDanglingAsterisks(str) {
+        if (!str) return '';
+        var s = String(str);
+        // 콜론과 결합된 별표 정리 (:**, **:, : ** 등)
+        s = s.replace(/[:：]\s*\*\*/g, ' ').replace(/\*\*\s*[:：]/g, ' ');
+        // 잔존 콜론 찌꺼기 우선 정제
+        s = s.replace(/^[:：\s]+/, '');
+        // 짝이 맞지 않거나 양 끝에 걸친 별표 쌍 전면 정제
+        var starMatches = s.match(/\*\*/g);
+        if (starMatches && starMatches.length % 2 !== 0) {
+          s = s.replace(/\*\*/g, '');
+        }
+        return s.replace(/^[:：\s*•·\-_*]+/, '').replace(/[:：\s*•·\-_*]+$/, '').trim();
+      }
+
       function stripDrugPrefix(text, drugName) {
         if (!text) return '';
         var res = String(text).trim();
-        res = res.replace(/^(?:주의\s*대상|권장\s*수칙|실천\s*수칙|복약\s*안내|발생\s*원리|작용\s*원리|약리학적\s*원리|약리학적\s*작용원리)[:：]\s*/i, '').trim();
+
+        // 1. 선행 공통 레이블 제거
+        res = res.replace(/^(?:주의\s*대상|피할\s*대상|권장\s*수칙|실천\s*수칙|복약\s*안내|발생\s*원리|작용\s*원리|약리학적\s*원리|약리학적\s*작용원리)\s*[:：]?\s*/i, '').trim();
+
+        // 2. 선행 기호 찌꺼기 1차 제거
+        res = res.replace(/^[:：\s*•·\-_*]+/, '').trim();
         res = res.replace(/^[가-힣A-Za-z0-9·\s]{1,30}?\s*↔\s*/, '').trim();
-        if (drugName) {
-          var escapedDrug = drugName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-          var drugRegex = new RegExp('^(?:\\*\\*)?' + escapedDrug + '(?:\\*\\*)?\\s*(?:[:：]|↔|—|-)?\\s*', 'i');
-          res = res.replace(drugRegex, '').trim();
-          var brandOnly = drugName.replace(/\(.*?\)|\[.*?\]/g, '').trim().split(/\s+/)[0];
-          if (brandOnly.length >= 2) {
-            var escapedBrand = brandOnly.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            var brandRegex = new RegExp('^(?:\\*\\*)?' + escapedBrand + '(?:\\*\\*)?\\s*(?:[:：]|↔|—|-)?\\s*', 'i');
-            res = res.replace(brandRegex, '').trim();
+
+        // 3. 약물명 목록 수집
+        var drugNamesToCheck = [];
+        if (drugName) drugNamesToCheck.push(drugName);
+        if (Array.isArray(prescribedMeds)) {
+          prescribedMeds.forEach(function(m) { if (m && m.name) drugNamesToCheck.push(m.name); });
+        }
+        if (typeof otcMeds !== 'undefined' && Array.isArray(otcMeds)) {
+          otcMeds.forEach(function(o) { if (o && o.name) drugNamesToCheck.push(o.name); });
+        }
+        drugNamesToCheck.sort(function(a, b) { return String(b).length - String(a).length; });
+
+        // 루프를 돌며 선행 약물명 및 조사/접미사(복용 시, 의 경우 등)를 완전히 발라냄
+        var changed = true;
+        var loopCount = 0;
+        while (changed && loopCount < 5) {
+          changed = false;
+          loopCount++;
+          res = res.replace(/^[:：\s*•·\-_*]+/, '').trim();
+
+          for (var i = 0; i < drugNamesToCheck.length; i++) {
+            var dn = drugNamesToCheck[i];
+            var rawDn = String(dn).trim();
+            var brandOnly = rawDn.replace(/\(.*?\)|\[.*?\]/g, '').trim().split(/\s+/)[0];
+            var variants = [rawDn];
+            if (brandOnly && brandOnly.length >= 2 && brandOnly !== rawDn) variants.push(brandOnly);
+
+            for (var v = 0; v < variants.length; v++) {
+              var n = variants[v];
+              if (!n || n.length < 2) continue;
+              var escaped = n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+              // 약물명 뒤에 붙을 수 있는 각종 조사/접미사/콜론 패턴
+              var reg = new RegExp('^(?:\\[?\\*\\*|\\[)?' + escaped + '(?:\\]?\\*\\*|\\])?\\s*(?:의\\s*경우|는|은|이|가|을|를|과|와|복용\\s*시|복용|투여\\s*시|치료\\s*시)?\\s*(?:[:：]|↔|—|-)?\\s*', 'i');
+              if (reg.test(res)) {
+                res = res.replace(reg, '').trim();
+                changed = true;
+              }
+            }
+          }
+
+          // 범용적인 문두 볼드 약물명 패턴 ([약물명]:, **약물명:** 등) 제거
+          var genericBoldDrug = /^\[?\*\*[가-힣A-Za-z0-9·\s]{1,25}?\*\*\]?\s*(?:의\\s*경우|는|은|이|가|복용\\s*시)?\s*[:：]?\s*/;
+          if (genericBoldDrug.test(res)) {
+            res = res.replace(genericBoldDrug, '').trim();
+            changed = true;
           }
         }
-        res = res.replace(/^\*\*[가-힣A-Za-z0-9·\s]{1,25}?\*\*[:：]\s*/, '').trim();
-        res = res.replace(/^(?:[1-9]\)|[①-⑨]|[-•·*])\s*/, '').trim();
-        res = res.replace(/^(?:또한|그리고)\s+/, '').trim();
-        return res;
+
+        // 4. 후속 찌꺼기 기호 및 별표 최종 정제
+        res = res.replace(/^[:：\s*•·\-_*]+/, '').trim();
+        res = cleanDanglingAsterisks(res);
+        res = res.replace(/^[:：\s*•·\-_*]+/, '').trim();
+
+        return res.trim();
       }
 
       function determineCautionLabel(text) {
@@ -2273,7 +2389,8 @@
         var currentPrefix = '';
 
         segments.forEach(function(seg) {
-          var mPrefix = seg.match(/^(?:\*\*)?([가-힣a-zA-Z0-9·\s]+?)[:：](?:\*\*)?\s*(.*)$/);
+          // **약품명:** 또는 **약품명**: 또는 약품명: 등 다양한 약품 접두사 매칭
+          var mPrefix = seg.match(/^(?:\*\*)?([가-힣a-zA-Z0-9·\s]+?)(?:\*\*)?[:：](?:\*\*)?\s*(.*)$/);
           if (mPrefix) {
             currentPrefix = mPrefix[1].replace(/\*\*/g, '').trim();
             var body = mPrefix[2].trim();
@@ -2495,8 +2612,11 @@
         if (group.items.length === 1) {
           var item1 = group.items[0];
           var cleanCaution1 = stripDrugPrefix(item1.cautionText, group.medName);
+          cleanCaution1 = cleanDanglingAsterisks(cleanCaution1).replace(/^[:：\s*•·\-_*]+/, '').trim();
           var cleanAction1 = stripDrugPrefix(item1.actionText, group.medName);
+          cleanAction1 = cleanDanglingAsterisks(cleanAction1).replace(/^[:：\s*•·\-_*]+/, '').trim();
           var cleanMech1 = stripDrugPrefix(item1.mechanismText, group.medName);
+          cleanMech1 = cleanDanglingAsterisks(cleanMech1).replace(/^[:：\s*•·\-_*]+/, '').trim();
           var cautionLabel1 = determineCautionLabel(cleanCaution1);
 
           var mechSectionHtml1 = cleanMech1
@@ -2526,10 +2646,12 @@
           // 2가지 이상 항목: 한 카드 안에서 구획 분할 답변
           bodyHtml = group.items.map(function(item, idx) {
             var cleanCaution = stripDrugPrefix(item.cautionText, group.medName);
+            cleanCaution = cleanDanglingAsterisks(cleanCaution).replace(/^[:：\s*•·\-_*]+/, '').trim();
             var cleanAction = stripDrugPrefix(item.actionText, group.medName);
+            cleanAction = cleanDanglingAsterisks(cleanAction).replace(/^[:：\s*•·\-_*]+/, '').trim();
             var cleanMech = stripDrugPrefix(item.mechanismText, group.medName);
+            cleanMech = cleanDanglingAsterisks(cleanMech).replace(/^[:：\s*•·\-_*]+/, '').trim();
             var cautionLabel = determineCautionLabel(cleanCaution);
-            var topicTitle = determineTopicTitle(cleanCaution, idx);
 
             var mechSectionHtml = cleanMech
               ? '<div class="border-t border-slate-200 bg-slate-50/60 px-4 py-2.5 sm:py-3 text-left">' +
@@ -2548,7 +2670,7 @@
               '<div class="bg-slate-100/90 px-4 py-2 border-b border-slate-200 flex items-center justify-between flex-wrap gap-2">' +
                 '<div class="flex items-center gap-1.5">' +
                   '<span class="w-2 h-2 rounded-full bg-[#4F46E5]"></span>' +
-                  '<span class="text-xs font-extrabold text-[#202A3A]">구획 ' + (idx + 1) + (topicTitle ? (' · ' + topicTitle) : '') + '</span>' +
+                  '<span class="text-xs font-extrabold text-[#202A3A]">구획 ' + (idx + 1) + '</span>' +
                 '</div>' +
                 '<span class="text-[11px] font-bold text-[#536174]">' + cautionLabel + '</span>' +
               '</div>' +
@@ -2874,25 +2996,71 @@
       return parts.join('');
     }
 
+    // 비정형 답변 텍스트(한 줄로 이어진 텍스트, 인라인 불릿, 대괄호 태그 등) 정규화 파서
+    function normalizeAnswerText(text) {
+      if (!text) return '';
+      var raw = String(text).trim();
+
+      // 1. 대괄호 기반 구조화 태그 변환: [핵심 결론], [한줄 요약] 등 첫 줄 요점 태그는 볼드로 치환
+      raw = raw.replace(/^\[(?:핵심\s*결론|한줄\s*요약|요약|핵심\s*요점|총평)\]\s*(.+?)(?=\s*\[|\s*[•\-·*]|$)/i, function(m, g1) {
+        return '**' + g1.trim() + '**\n';
+      });
+      // 기타 [항목명] 태그는 개행 + 불릿으로 치환
+      raw = raw.replace(/(?:^|\s)\[([^\]\n]{1,24})\]\s*[:：]?\s*/g, function(m, g1) {
+        return '\n• ' + g1.trim() + ': ';
+      });
+
+      // 2. 인라인 불릿 및 알려진 키-값(Key-Value) 구분자 정규화
+      // 키워드 앞뒤에 볼드(**), 괄호, 유니코드 불릿(·, •, -, *, ・ 등)이 섞인 모든 패턴 흡수
+      var knownKeys = '핵심\\s*답변|핵심\\s*요점|핵심\\s*결론|작용\\s*원리|발생\\s*원리|약리\\s*기전|약물\\s*기전|체내\\s*원리|체내\\s*작용|체내\\s*약리\\s*기전|우리\\s*몸에서\\s*작용하는\\s*방식|권장\\s*수칙|주의\\s*사항|복약\\s*수칙|복약\\s*안내|대처\\s*방법|실천\\s*수칙|대안\\s*수칙|생활\\s*가이드|임상\\s*소견|약사\\s*소견|주의\\s*약물|주의\\s*대상|피할\\s*대상|분석\\s*근거|근거\\s*출처|학회\\s*지침\\s*및\\s*처방\\s*조합\\s*근거|보충\\s*이유|추천\\s*식단\\s*및\\s*보충\\s*가이드';
+      var keyRegex = new RegExp('(?:^|\\s)(?:[•\\-·*・‧∙●■▪▶▷]\\s*)?(?:\\*\\*)?\\s*(?:[•\\-·*・‧∙●■▪▶▷]\\s*)?(' + knownKeys + ')\\s*(?:\\*\\*)?\\s*[:：]\\s*(?:\\*\\*)?\\s*', 'g');
+      raw = raw.replace(keyRegex, function(m, k) {
+        var cleanK = k.replace(/\s+/g, '').replace(/\*\*/g, '');
+        return '\n• ' + cleanK + ': ';
+      });
+
+      // 3. 콜론을 포함한 일반 인라인 불릿 분리: " · 항목명: " -> "\n• 항목명: "
+      raw = raw.replace(/(?:\s*(?:[•\-·*・‧∙●■▪▶▷]|\d+\.))\s*([가-힣a-zA-Z0-9\s]{1,16}[:：])\s*/g, function(match, kvLabel) {
+        return '\n• ' + kvLabel.trim() + ' ';
+      });
+
+      // 4. 첫 줄에 키-값 불릿이 나오기 전의 선행 요약 문장이 있을 때, 이를 볼드 요약문으로 승격
+      var firstBulletIdx = raw.indexOf('\n• ');
+      if (firstBulletIdx > 0) {
+        var leader = raw.substring(0, firstBulletIdx).trim();
+        var rest = raw.substring(firstBulletIdx);
+        leader = leader.replace(/^[:：\s*•·\-_*]+/, '').replace(/[:：\s*•·\-_*]+$/, '').trim();
+        if (leader && !/^\*\*.*?\*\*$/.test(leader)) {
+          leader = '**' + leader.replace(/\*\*/g, '').trim() + '**';
+        }
+        raw = leader + rest;
+      } else {
+        // 첫 줄 볼드 닫힘 뒤에 바로 본문/불릿이 시작되는 경우 개행 삽입
+        raw = raw.replace(/^(\*\*[^\*\n]+\*\*)\s*(?=[•\-·*・‧∙●■▪▶▷])/i, '$1\n');
+      }
+
+      return raw.replace(/\n{3,}/g, '\n\n').trim();
+    }
+
     // 공통 스마트 렌더러(formatPreviewHtml): 줄/문단 단위로 분석하여
-    // 1) 첫 줄 볼드 문장 -> Argon '요약 헤더 바(Header Surface)'
-    // 2) 불릿 키-값(• 항목명: 내용) -> Argon divide-y 테이블형 그룹 컨테이너 및 마지막 수칙 행 하이라이트
+    // 1) 첫 줄 볼드/요약 문장 -> 시각적 하이라이트 배너('💡 약사 핵심 요약')
+    // 2) 불릿 키-값(• 항목명: 내용) -> 항목별 테마가 적용된 수직 카드 스택(Card Flow)
     // 3) 문장 내 일반 볼드 -> 얼룩 없는 고대비 볼드
     // 4) 출처 캡션 -> 하단 보조 텍스트(text-xs text-[#536174])로 자동 조립
     function formatPreviewHtml(text, isDarkBg, options) {
       if (!text) return '';
       var opts = options || {};
-      var raw = String(text).replace(/\[|\]/g, '').trim();
-      if (!raw) return '';
+      var normalized = normalizeAnswerText(text);
+      if (!normalized) return '';
 
-      var rawLines = raw.split(/\r?\n/).map(function(l) { return l.trim(); }).filter(Boolean);
+      var rawLines = normalized.split(/\r?\n/).map(function(l) { return l.trim(); }).filter(Boolean);
 
       // 단일 행이면서 불릿(•, -, ·)이나 대제목(■)이 아니고 강제 구조화 옵션이 없는 경우
       if (!opts.forceStructured && rawLines.length === 1 && !/^(?:[•\-·*]|(?:\*\*)?■)/.test(rawLines[0])) {
         return formatInlinePreviewHtml(rawLines[0], isDarkBg);
       }
 
-      var paragraphs = raw.split(/\n{2,}/);
+      var paragraphs = normalized.split(/\n{2,}/);
       var htmlBlocks = [];
 
       paragraphs.forEach(function(pBlock, pIdx) {
@@ -2904,6 +3072,11 @@
         var kvRows = [];
         var otherLinesHtml = [];
         var sourceCaptions = [];
+
+        // 후속 행들 중에 키-값 불릿 행이 존재하는지 확인 (첫 줄 요약문 감지용)
+        var hasKvAfterFirst = lines.slice(1).some(function(l) {
+          return /^[•\-·*]\s*[^:：]{1,28}[:：]/.test(l);
+        });
 
         lines.forEach(function(line, lineIdx) {
           // 0) 문장 끝에 붙은 "(출처: ...)" 추출 분리
@@ -2933,19 +3106,26 @@
             return;
           }
 
-          // 3) 문단 맨 첫 줄에 위치한 볼드 문장 -> 카드의 '요약 헤더 바(Header Surface)'로 독립 배치
-          if (lineIdx === 0 && /^\*\*(.+?)\*\*$/.test(line)) {
+          // 3) 문단 맨 첫 줄에 위치한 요약 문장 -> 카드의 '💡 약사 핵심 요약' 하이라이트 배너로 독립 배치
+          // (명시적 볼드 **...** 이거나, 후속 행에 키-값 불릿들이 뒤따라오는 첫 비불릿 행인 경우)
+          var isExplicitBoldTitle = (lineIdx === 0 && /^\*\*(.+?)\*\*$/.test(line));
+          var isFirstSummaryLeader = (lineIdx === 0 && !/^[•\-·*■]/.test(line) && hasKvAfterFirst);
+
+          if (isExplicitBoldTitle || isFirstSummaryLeader) {
             var bannerText = line.replace(/^\*\*/, '').replace(/\*\*$/, '').trim();
             if (opts.compactHeader) {
               headerSurfaceHtml = (
-                '<div class="text-[16px] sm:text-[17px] font-extrabold text-[#202A3A] pb-1.5 mb-1.5 border-b border-[#E2E8F0]/80 block text-left break-keep leading-snug">' +
+                '<div class="text-[16px] sm:text-[17px] font-extrabold text-[#202A3A] pb-1.5 mb-2 border-b border-[#E2E8F0]/80 block text-left break-keep leading-snug">' +
                   formatInlinePreviewHtml(bannerText, isDarkBg) +
                 '</div>'
               );
             } else {
               headerSurfaceHtml = (
-                '<div class="bg-slate-50 border border-[#E2E8F0] rounded-xl px-4 py-3 mb-3 flex items-center justify-between text-left break-keep">' +
-                  '<div class="text-[16px] sm:text-[17px] font-extrabold text-[#202A3A] leading-snug break-keep">' +
+                '<div class="bg-gradient-to-r from-indigo-50/90 via-slate-50 to-blue-50/60 border border-indigo-100/90 border-l-4 border-l-[#4F46E5] rounded-xl p-3.5 sm:p-4 mb-3 shadow-2xs text-left break-keep">' +
+                  '<div class="flex items-center gap-1.5 mb-1.5">' +
+                    '<span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-black bg-[#4F46E5] text-white shadow-2xs">💡 약사 핵심 요약</span>' +
+                  '</div>' +
+                  '<div class="text-[16px] sm:text-[17px] font-extrabold text-[#1E293B] leading-snug break-keep">' +
                     formatInlinePreviewHtml(bannerText, isDarkBg) +
                   '</div>' +
                 '</div>'
@@ -2954,7 +3134,7 @@
             return;
           }
 
-          // 4) 불릿 키-값 행 (줄 시작이 •, -, · 이면서 콜론(:)을 포함하는 문장 -> 2열 Key-Value Row 자동 변환)
+          // 4) 불릿 키-값 행 (줄 시작이 •, -, · 이면서 콜론(:)을 포함하는 문장 -> 수직 구조화 카드 변환)
           var kvMatch = line.match(/^[•\-·*]\s*([^:：]{1,28}?)\s*[:：]\s*(.+)$/);
           if (kvMatch) {
             var kLabel = kvMatch[1].replace(/\*\*/g, '').trim();
@@ -2967,8 +3147,8 @@
           if (/^[•\-·*]\s+/.test(line)) {
             var bulletContent = line.replace(/^[•\-·*]\s+/, '').trim();
             otherLinesHtml.push(
-              '<div class="flex items-start gap-2 text-left text-[16px] sm:text-[17px] text-[#202A3A] leading-[1.7] break-keep">' +
-                '<span class="text-[#4F46E5] font-bold shrink-0">•</span>' +
+              '<div class="flex items-start gap-2 text-left text-[15px] sm:text-[16px] text-[#202A3A] leading-[1.7] break-keep">' +
+                '<span class="text-[#4F46E5] font-bold shrink-0 mt-0.5">•</span>' +
                 '<div class="flex-1 text-left break-keep">' + formatInlinePreviewHtml(bulletContent, isDarkBg) + '</div>' +
               '</div>'
             );
@@ -2977,7 +3157,7 @@
 
           // 6) 일반 본문 행
           otherLinesHtml.push(
-            '<div class="text-left text-[16px] sm:text-[17px] text-[#202A3A] leading-[1.7] break-keep">' +
+            '<div class="text-left text-[15px] sm:text-[16px] text-[#202A3A] leading-[1.7] break-keep">' +
               formatInlinePreviewHtml(line, isDarkBg) +
             '</div>'
           );
@@ -2995,7 +3175,7 @@
 
         if (kvRows.length > 0) {
           blockParts.push(
-            '<div class="bg-white border border-[#E2E8F0] rounded-xl divide-y divide-[#E2E8F0] overflow-hidden mb-2 break-keep">' +
+            '<div class="space-y-2.5 mb-2 break-keep">' +
               kvRows.join('') +
             '</div>'
           );
@@ -3013,7 +3193,7 @@
           );
         });
 
-        htmlBlocks.push('<div class="space-y-1.5 text-left break-keep">' + blockParts.join('') + '</div>');
+        htmlBlocks.push('<div class="space-y-2 text-left break-keep">' + blockParts.join('') + '</div>');
       });
 
       return htmlBlocks.join('<div class="my-3"></div>');
@@ -3260,17 +3440,20 @@
         return result;
       }
 
-      // 4. c5SupplementProfiles에서 현재 품목과 매칭되는 AI 프로필 검색 헬퍼
+      // 4. c5SupplementProfiles / wizardState에서 현재 품목과 매칭되는 AI 프로필 검색 헬퍼
       function findSupplementProfile(cleanItemName, fullItemName) {
-        if (typeof c5SupplementProfiles === 'undefined' || !Array.isArray(c5SupplementProfiles) || c5SupplementProfiles.length === 0) {
+        var profiles = (typeof c5SupplementProfiles !== 'undefined' && Array.isArray(c5SupplementProfiles) && c5SupplementProfiles.length > 0)
+          ? c5SupplementProfiles
+          : ((typeof wizardState !== 'undefined' && wizardState && Array.isArray(wizardState.supplement_profiles)) ? wizardState.supplement_profiles : []);
+        if (profiles.length === 0) {
           return null;
         }
         var targetClean = String(cleanItemName || '').replace(/\(.*?\)|\[.*?\]/g, '').replace(/\s+/g, '').toLowerCase();
         var targetFull = String(fullItemName || '').replace(/\s+/g, '').toLowerCase();
         if (!targetClean) return null;
 
-        for (var i = 0; i < c5SupplementProfiles.length; i++) {
-          var prof = c5SupplementProfiles[i];
+        for (var i = 0; i < profiles.length; i++) {
+          var prof = profiles[i];
           if (!prof || !prof.name) continue;
           var profClean = String(prof.name).replace(/\(.*?\)|\[.*?\]/g, '').replace(/\s+/g, '').toLowerCase();
           var profFull = String(prof.name).replace(/\s+/g, '').toLowerCase();
@@ -3283,8 +3466,8 @@
         }
 
         var tokens = getItemSearchTokens(cleanItemName);
-        for (var j = 0; j < c5SupplementProfiles.length; j++) {
-          var prof2 = c5SupplementProfiles[j];
+        for (var j = 0; j < profiles.length; j++) {
+          var prof2 = profiles[j];
           if (!prof2 || !prof2.name) continue;
           var profLower = String(prof2.name).toLowerCase();
           for (var k = 0; k < tokens.length; k++) {
@@ -3335,10 +3518,23 @@
           var firstBlockLines = zone1RawBlocks[0].split(/\r?\n/).map(function(l) { return l.trim(); }).filter(Boolean);
           var headerLine = firstBlockLines.length > 0 ? firstBlockLines[0].replace(/\*\*/g, '').replace(/^■\s*/, '').trim() : '';
 
-          // 과제 2: targetItemNames 단일화 (1순위 activeOtcList 존재 시 즉시 탐색 종료)
+          // 과제 2: targetItemNames 단일화 (1순위 c5SupplementProfiles / wizardState 프로필 중 포함된 품목 우선, 2순위 activeOtcList, 3순위 헤더 파싱)
           var targetItemNames = [];
-          // 1순위: 좌측 입력창의 유효 품목(activeOtcList)이 존재하면 그것만 사용하고 즉시 탐색 종료!
-          if (activeOtcList.length > 0) {
+          var hasExplicitProfiles = (typeof c5SupplementProfiles !== 'undefined' && Array.isArray(c5SupplementProfiles)) ||
+                                    (typeof wizardState !== 'undefined' && wizardState && Array.isArray(wizardState.supplement_profiles));
+
+          if (hasExplicitProfiles) {
+            var activeProfiles = (typeof c5SupplementProfiles !== 'undefined' && Array.isArray(c5SupplementProfiles))
+              ? c5SupplementProfiles.filter(function(s){ return s.included !== false; })
+              : (wizardState.supplement_profiles || []).filter(function(s){ return s.included !== false; });
+
+            activeProfiles.forEach(function(p) {
+              var n = String(p.name).trim();
+              if (n && targetItemNames.indexOf(n) === -1) {
+                targetItemNames.push(n);
+              }
+            });
+          } else if (activeOtcList.length > 0) {
             activeOtcList.forEach(function(m) {
               var n = String(m.name).trim();
               if (n && targetItemNames.indexOf(n) === -1) {
@@ -3346,7 +3542,7 @@
               }
             });
           } else {
-            // 2순위: activeOtcList가 비어 있을 때만 텍스트 헤더/접두사 파싱 실행
+            // 3순위: 프로필과 activeOtcList가 모두 없을 때만 텍스트 헤더/접두사 파싱 실행
             var dashParts1 = headerLine.split(/\s*(?:—|--|-|:)\s*/);
             if (dashParts1.length > 1) {
               var rawNames = dashParts1.slice(1).join(' · ').split(/[,·/]+/).map(function(s) {
@@ -3384,17 +3580,25 @@
               var fallbackClauses = extractItemFallbackClauses(bodyLines, fullItemName, targetItemNames);
               var combinedExtracted = [fallbackClauses.safetyClause, fallbackClauses.roleClause, fallbackClauses.generalClause].filter(Boolean).join(' ');
 
-              // 안전성 등급(SAFE / CAUTION / CONTRAINDICATED) 동적 판정
+              // 안전성 등급(SAFE / CAUTION / CONTRAINDICATED) 동적 판정 (약사 선택 safety_level 최우선 절대 보장)
               var safetyLevel = 'SAFE';
               if (matchedProfile && matchedProfile.safety_level) {
                 var rawLvl = String(matchedProfile.safety_level).toUpperCase().trim();
-                var rawLbl = String(matchedProfile.status_label || '');
-                if (rawLvl.indexOf('CONTRA') !== -1 || /중단|금기|충돌/.test(rawLbl)) {
+                if (rawLvl.indexOf('CONTRA') !== -1 || rawLvl === 'STOP') {
                   safetyLevel = 'CONTRAINDICATED';
-                } else if (rawLvl.indexOf('CAUTION') !== -1 || /주의|조절|간격/.test(rawLbl)) {
+                } else if (rawLvl.indexOf('CAUTION') !== -1 || rawLvl === 'WARN') {
                   safetyLevel = 'CAUTION';
-                } else {
+                } else if (rawLvl.indexOf('SAFE') !== -1) {
                   safetyLevel = 'SAFE';
+                } else {
+                  var rawLbl = String(matchedProfile.status_label || '');
+                  if (/중단|금기|충돌/.test(rawLbl)) {
+                    safetyLevel = 'CONTRAINDICATED';
+                  } else if (/주의|조절|간격/.test(rawLbl)) {
+                    safetyLevel = 'CAUTION';
+                  } else {
+                    safetyLevel = 'SAFE';
+                  }
                 }
               } else {
                 var textForEval = (combinedExtracted + ' ' + fullItemName)
@@ -3462,7 +3666,9 @@
                 step2Mechanism = escapeHtml(rawS2 || (safetyLevel === 'CONTRAINDICATED' ? '처방약 분해 효소 방해 및 약효 차단' : (safetyLevel === 'CAUTION' ? '처방약 흡수·대사 과정 간섭 주의' : '몸속에서 부딪히지 않고 각자 치료와 건강 관리를 도움')));
                 step3Result = escapeHtml(rawS3);
                 detailedMechanismText = matchedProfile.easy_benefit_summary || fallbackClauses.roleClause || matchedProfile.detailed_mechanism || '처방약과 함께 복용 시 신체 활력과 건강 회복을 돕습니다.';
-                itemActionGuidance = fallbackClauses.safetyClause || matchedProfile.action_guidance || (safetyLevel === 'CONTRAINDICATED' ? '처방약과의 충돌 위험이 있으므로 복용을 중단하시고 주치의 또는 약사와 상의하세요.' : (safetyLevel === 'CAUTION' ? '처방약과 복용 간격 또는 사용 횟수를 조절하여 복용하세요.' : '상용량 범위 내에서 정해진 용법에 따라 복용을 유지하세요.'));
+                itemActionGuidance = (matchedProfile && matchedProfile.action_guidance)
+                  ? matchedProfile.action_guidance
+                  : (fallbackClauses.safetyClause || (safetyLevel === 'CONTRAINDICATED' ? '처방약과의 충돌 위험이 있으므로 복용을 중단하시고 주치의 또는 약사와 상의하세요.' : (safetyLevel === 'CAUTION' ? '처방약과 복용 간격 또는 사용 횟수를 조절하여 복용하세요.' : '상용량 범위 내에서 정해진 용법에 따라 복용을 유지하세요.')));
               } else {
                 // 2순위: 약사 수동 텍스트 파싱 폴백
                 step1Drug = formatStep1InputHtml(fullItemName, cleanItemName);
@@ -4158,6 +4364,7 @@
     function updateOtcMed(idx, key, val) {
       otcMeds[idx][key] = val;
       syncOtcToHiddenInput();
+      autoGenerateTimetableFromMeds(false);
       syncAllFields();
     }
 
@@ -4165,6 +4372,7 @@
       otcMeds.push({ name: '', note: '복용 중' });
       renderOtcMedsTable();
       syncOtcToHiddenInput();
+      autoGenerateTimetableFromMeds(false);
       syncAllFields();
     }
 
@@ -4172,6 +4380,7 @@
       otcMeds.splice(idx, 1);
       renderOtcMedsTable();
       syncOtcToHiddenInput();
+      autoGenerateTimetableFromMeds(false);
       syncAllFields();
     }
 
@@ -4246,7 +4455,7 @@
       'in_otc_supplement', 'in_top_symptom', 'in_patient_1pick_question',
       'in_custom_question_text', 'in_custom_answer_text',
       'in_excluded_drugs', 'in_unconfirmed_info',
-      'in_c3_answer', 'in_c2_answer', 'in_c4_answer',
+      'in_c3_answer', 'in_c2_answer', 'in_c4_answer', 'in_c4_level',
       'in_c1_title', 'in_c1_answer', 'in_c5_answer',
       'in_faq_text', 'in_qpl_facts', 'in_qpl_question',
       'in_core_summary', 'in_today_action',
@@ -4762,8 +4971,8 @@
         });
       }
 
-      if (prescribedMeds.length > 0) {
-        resolveAllPrescribedMedsFromSupabase();
+      if (prescribedMeds.length > 0 || (Array.isArray(otcMeds) && otcMeds.length > 0)) {
+        if (prescribedMeds.length > 0) resolveAllPrescribedMedsFromSupabase();
         autoGenerateTimetableFromMeds(false);
       }
 
@@ -4771,29 +4980,32 @@
       var customBox = document.getElementById('customQuestionEditBox');
       var mq = (data.main_question || '').trim();
 
+      // index.html 5대 표준 질문 정밀 매핑
       if (!mq || mq === '미선택') {
-        qSelect.value = 'q1';
-        customBox.classList.add('hidden');
-      } else if (mq.indexOf('센 약') !== -1 || mq.indexOf('치료 단계') !== -1) {
-        qSelect.value = 'q1';
-        customBox.classList.add('hidden');
-      } else if (mq.indexOf('먹으면 안') !== -1 || mq.indexOf('음식') !== -1) {
         qSelect.value = 'q2';
         customBox.classList.add('hidden');
-      } else if (mq.indexOf('다른 약') !== -1 || mq.indexOf('충돌') !== -1 || mq.indexOf('상호작용') !== -1) {
-        qSelect.value = 'q3';
+      } else if (mq.indexOf('영양제') !== -1 || mq.indexOf('무리') !== -1 || mq.indexOf('음식') !== -1 || mq.indexOf('먹으면 안') !== -1) {
+        // 1번: 지금 먹는 약들과 영양제를 함께 먹어도 내 몸에 무리를 주지 않나요? -> Q2
+        qSelect.value = 'q2';
         customBox.classList.add('hidden');
-      } else if (mq.indexOf('부작용') !== -1 || mq.indexOf('이상반응') !== -1) {
+      } else if (mq.indexOf('불편한 증상') !== -1 || mq.indexOf('약 때문') !== -1 || mq.indexOf('부작용') !== -1 || mq.indexOf('이상반응') !== -1) {
+        // 2번: 요즘 느끼는 불편한 증상이 혹시 지금 먹는 약 때문일 수 있나요? -> Q4
         qSelect.value = 'q4';
         customBox.classList.add('hidden');
-      } else if (mq.indexOf('영양소') !== -1 || mq.indexOf('드러그머거') !== -1) {
-        qSelect.value = 'q5';
+      } else if (mq.indexOf('아침·점심·저녁') !== -1 || mq.indexOf('나눠 먹') !== -1 || mq.indexOf('복용 시간') !== -1 || mq.indexOf('치료 단계') !== -1 || mq.indexOf('가이드라인') !== -1 || mq.indexOf('진료지침') !== -1) {
+        // 3번: 약 효과가 가장 좋도록 아침·점심·저녁 언제 어떻게 나눠 먹어야 하나요? -> Q1
+        qSelect.value = 'q1';
+        customBox.classList.add('hidden');
+      } else if (mq.indexOf('약물 조합') !== -1 || mq.indexOf('주의할 점') !== -1 || mq.indexOf('다른 약') !== -1 || mq.indexOf('상호작용') !== -1) {
+        // 4번: 현재 내 약물 조합에서 앞으로 건강 관리를 위해 특별히 주의할 점은 무엇인가요? -> Q3
+        qSelect.value = 'q3';
         customBox.classList.add('hidden');
       } else {
+        // 5번: 기타 궁금한 점 직접 적기 (환자 주관식 질문) -> custom
         qSelect.value = 'custom';
         customBox.classList.remove('hidden');
         document.getElementById('in_custom_question_text').value = mq;
-        document.getElementById('in_custom_answer_text').value = '**"' + mq + '"에 대한 맞춤 복약 가이드**\n• 핵심 답변: 상단의 <u>AI 임상 분석</u> 버튼을 누르면 처방약 성분에 맞춰 이해하기 쉽게 풀어쓴 맞춤 답변이 작성됩니다.\n• 작용 원리: 현재 복용 중이신 처방약(' + (prescribedMeds.map(function(m) { return m.name; }).join(', ') || '처방약') + ')이 <u>우리 몸 안에서 작용하는 방식과 궁금해하신 내용의 연관성</u>을 함께 살펴봅니다.\n• 권장 수칙: 약물을 <u>임의로 중단하거나 용량을 바꾸지 마시고</u> 아래 약사 검수 안내를 확인해 주세요.';
+        document.getElementById('in_custom_answer_text').value = '**"' + mq + '"에 대한 맞춤 복약 소견**\n• 핵심 답변: 환자분께서 직접 질문해 주신 내용에 대해 약사가 처방 성분을 검토하여 작성한 소견입니다.\n• 일상 수칙: 안내해 드린 복약 원칙을 지키시고, 궁금한 점은 언제든 약국으로 문의해 주세요.';
       }
 
       setupInitialClinicalDefaults(ptName, ptBirth, topSymptom, otcText, data);
@@ -4928,14 +5140,14 @@
         { name: '세비카정 5/20mg', ingredient: '올메사르탄/암로디핀', dose: '1정', timing: '1일 1회 아침 식후', role: '주처방약', itemSeq: '200808588', imgUrl: 'https://nedrug.mfds.go.kr/pbp/cmn/itemImageDownload/147427883772600191', shape: '하양 원형', imprint: 'C73', chart: '흰색의 원형 필름코팅정제' },
         { name: '리피토정 20mg', ingredient: '아토르바스타틴', dose: '1정', timing: '1일 1회 저녁 식후', role: '주처방약', itemSeq: '200410085', imgUrl: 'https://nedrug.mfds.go.kr/pbp/cmn/itemImageDownload/1O0bxj5Fj_X', shape: '하양 원형', imprint: 'ATV | 20', chart: '흰색의 원형 필름코팅정' }
       ];
-      resolveAllPrescribedMedsFromSupabase();
-      autoGenerateTimetableFromMeds(false);
       otcMeds = [
         { name: '관절 파스 (소염진통 외용제)', note: '주 3~4회 사용' },
         { name: '오메가3', note: '매일 식후 복용' }
       ];
+      resolveAllPrescribedMedsFromSupabase();
       renderOtcMedsTable();
       syncOtcToHiddenInput();
+      autoGenerateTimetableFromMeds(false);
       syncRichEditorsFromTextareas();
     }
 
@@ -5687,12 +5899,53 @@
 
     function updatePrescribedMed(idx, key, val, syncPreview) {
       if (!prescribedMeds[idx]) return;
+      var oldTiming = prescribedMeds[idx].timing;
+      var oldName = prescribedMeds[idx].name;
       prescribedMeds[idx][key] = val;
+      // timing 또는 약품명 변경 시 기존 드래그 배치 상태를 보존하며 스마트 재분류
+      if (key === 'timing' || key === 'name' || key === 'dose') {
+        smartReconcilePrescribedMedInSlots(idx, oldName, prescribedMeds[idx].name, prescribedMeds[idx].timing, prescribedMeds[idx].dose);
+      }
       if (syncPreview !== false) {
         syncPrescribedMedsPreview();
         if (typeof syncAllFields === 'function') syncAllFields();
       }
       autoSaveDraft();
+    }
+    // 스마트 위치 보존 재배치 헬퍼: 기존 수동 드래그 배치 내역을 파괴하지 않고 동기화
+    function smartReconcilePrescribedMedInSlots(medIdx, oldName, newName, newTiming, newDose) {
+      if (!timetableSlots) {
+        autoGenerateTimetableFromMeds(false);
+        return;
+      }
+      // 1. 기존 슬롯에서 해당 약물 항목 제거
+      Object.keys(timetableSlots).forEach(function(slotKey) {
+        timetableSlots[slotKey] = timetableSlots[slotKey].filter(function(item) {
+          if (item.medIdx === medIdx) return false;
+          if (oldName && item.name === oldName && !item.isOtc) return false;
+          return true;
+        });
+      });
+      // 2. 새로운 용법에 맞춰 대상 슬롯 산출 후 주입
+      var targetSlots = mapMedTimingToSlots(newTiming || '');
+      var medObj = prescribedMeds[medIdx];
+      targetSlots.forEach(function(slotKey) {
+        if (!timetableSlots[slotKey]) return;
+        timetableSlots[slotKey].push({
+          id: 'item_' + medIdx + '_' + slotKey + '_' + Date.now(),
+          medIdx: medIdx,
+          name: newName || '처방약',
+          dose: newDose || (medObj ? medObj.dose : '1정') || '1정',
+          timing: newTiming || '',
+          shape: medObj ? medObj.shape : '',
+          imprint: medObj ? medObj.imprint : '',
+          imgUrl: medObj ? medObj.imgUrl : '',
+          isOtc: false
+        });
+      });
+      syncTimetableRowsFromSlots();
+      renderTimetablePreview();
+      renderTimetableEditor();
     }
 
     function addPrescribedMedRow() {
@@ -5709,6 +5962,7 @@
         chart: ''
       });
       renderPrescribedMedsTable();
+      autoGenerateTimetableFromMeds(false);
       syncPrescribedMedsPreview();
       autoSaveDraft();
     }
@@ -5716,6 +5970,7 @@
     function deletePrescribedMedRow(idx) {
       prescribedMeds.splice(idx, 1);
       renderPrescribedMedsTable();
+      autoGenerateTimetableFromMeds(false);
       syncPrescribedMedsPreview();
       autoSaveDraft();
     }
@@ -5855,7 +6110,65 @@
       return slots.length > 0 ? slots : ['morning_none'];
     }
 
-    // 처방약 기반 24시간 시간표 자동 생성 알고리즘
+    // 복용 중인 영양제·일반약(otcMeds) 최적 복약 시간대 스마트 매핑 헬퍼
+    function inferOtcTimingSlot(otc) {
+      if (!otc || !otc.name) return 'lunch_after';
+      var rawText = (otc.name + ' ' + (otc.note || '') + ' ' + (otc.timing || '')).toLowerCase();
+
+      // 1. 환자/약사가 입력한 명시적 시간대(아침·점심·저녁·취침전·필요시) 최우선 적용
+      if (/취침|자기\s*전|잠들기\s*전|수면\s*전/.test(rawText)) return 'bedtime';
+      if (/필요\s*시|증상\s*시|아플\s*때|통증\s*시|prn/.test(rawText)) return 'prn';
+
+      var hasExplicitMorning = /아침|오전|기상\s*직후|기상\s*후/.test(rawText);
+      var hasExplicitLunch = /점심|정오|오후/.test(rawText);
+      var hasExplicitDinner = /저녁|석식|밤\s*(?!에)/.test(rawText);
+
+      if (hasExplicitMorning) {
+        return /식전|공복/.test(rawText) ? 'morning_before' : 'morning_after';
+      }
+      if (hasExplicitLunch) {
+        return /식전|공복/.test(rawText) ? 'lunch_before' : 'lunch_after';
+      }
+      if (hasExplicitDinner) {
+        return /식전|공복/.test(rawText) ? 'dinner_before' : 'dinner_after';
+      }
+
+      // 2. 시간대 미지정(단순 "매일 식후", "복용 중", "1일 1회" 등) 시 성분별 임상 최적 복약 시간대 스마트 자동 추천
+      // A. 취침전: 신경 안정, 근육 이완 및 처방약 킬레이트 흡수 방해 차단
+      if (/마그네슘|테아닌|멜라토닌|가바|gaba|칼슘|미네랄|수면|안정|근육\s*이완/.test(rawText)) {
+        return 'bedtime';
+      }
+
+      // B. 점심 식후: 지용성 비타민 흡수율 극대화 및 아침 처방약과의 흡수 간섭 분리
+      if (/오메가|omega|dha|epa|비타민d|vit\s*d|루테인|지아잔틴|코엔자임|coq10|크릴|밀크씨슬|실리마린|지용성/.test(rawText)) {
+        return 'lunch_after';
+      }
+
+      // C. 아침 식전: 공복 위산 회피 및 장내 도달율 극대화
+      if (/유산균|프로바이오틱스|프리바이오틱스|포스트바이오틱스|락토|비피더스/.test(rawText)) {
+        return 'morning_before';
+      }
+
+      // D. 아침 식후: 낮 동안의 에너지 생성 촉진 및 공복 속쓰림 방지
+      if (/비타민b|비맥스|아로나민|임팩타민|활성비타민|종합비타민|멀티비타민|홍삼|인삼|아르기닌|비타민c|항산화/.test(rawText)) {
+        return 'morning_after';
+      }
+
+      // E. 외용제: 필요시
+      if (/파스|패취|연고|크림|겔|점안|안약|스프레이/.test(rawText)) {
+        return 'prn';
+      }
+
+      // F. 단순 공복 기재 시 아침 식전
+      if (/식전|공복/.test(rawText)) {
+        return 'morning_before';
+      }
+
+      // 기본값: 아침 처방약과의 흡수 간섭을 피해 '점심 식후'로 안전 분리
+      return 'lunch_after';
+    }
+
+    // 처방약 및 영양제 기반 24시간 복약 시간표 자동 생성 알고리즘
     function autoGenerateTimetableFromMeds(showToastAlert) {
       if (showToastAlert === undefined) showToastAlert = true;
 
@@ -5873,37 +6186,70 @@
         prn: []
       };
 
-      if (!Array.isArray(prescribedMeds) || prescribedMeds.length === 0) {
+      var hasPrescribed = Array.isArray(prescribedMeds) && prescribedMeds.length > 0;
+      var validOtcList = (Array.isArray(otcMeds) ? otcMeds : []).filter(function(o) {
+        if (!o || !o.name) return false;
+        var n = String(o.name).trim();
+        return n && n !== '없음' && n !== '미기재' && n !== '특이사항 없음' && n !== '복용 영양제 점검';
+      });
+
+      if (!hasPrescribed && validOtcList.length === 0) {
         syncTimetableRowsFromSlots();
         renderTimetableEditor();
         renderTimetablePreview();
-        if (showToastAlert) showToast("분석할 처방약 목록이 비어 있습니다.", "!");
+        if (showToastAlert) showToast("분석할 처방약 및 영양제 목록이 비어 있습니다.", "!");
         return;
       }
 
       var itemCounter = 0;
 
-      prescribedMeds.forEach(function(m, idx) {
-        var timingStr = (m.timing || '').trim();
-        var targetSlots = mapMedTimingToSlots(timingStr);
+      // 1. 처방약(prescribedMeds) 순회 및 슬롯 배치
+      if (hasPrescribed) {
+        prescribedMeds.forEach(function(m, idx) {
+          var timingStr = (m.timing || '').trim();
+          var targetSlots = mapMedTimingToSlots(timingStr);
 
-        targetSlots.forEach(function(slotKey) {
-          if (!timetableSlots[slotKey]) return;
+          targetSlots.forEach(function(slotKey) {
+            if (!timetableSlots[slotKey]) return;
+            itemCounter++;
+            var slotItem = {
+              id: 'item_' + idx + '_' + slotKey + '_' + itemCounter,
+              medIdx: idx,
+              name: m.name || '처방약',
+              dose: m.dose || '1정',
+              timing: m.timing || '',
+              shape: m.shape || '',
+              imprint: m.imprint || '',
+              imgUrl: m.imgUrl || '',
+              isOtc: false
+            };
+            timetableSlots[slotKey].push(slotItem);
+          });
+        });
+      }
+
+      // 2. 복용 중인 영양제·일반약(otcMeds) 스마트 순회 및 슬롯 자동 배치
+      if (validOtcList.length > 0) {
+        validOtcList.forEach(function(otc, otcIdx) {
+          var targetSlot = inferOtcTimingSlot(otc);
+          if (!timetableSlots[targetSlot]) targetSlot = 'lunch_after';
+
           itemCounter++;
           var slotItem = {
-            id: 'item_' + idx + '_' + slotKey + '_' + itemCounter,
-            medIdx: idx,
-            name: m.name || '처방약',
-            dose: m.dose || '1정',
-            timing: m.timing || '',
-            shape: m.shape || '',
-            imprint: m.imprint || '',
-            imgUrl: m.imgUrl || '',
-            isOtc: false
+            id: 'otc_item_' + otcIdx + '_' + targetSlot + '_' + itemCounter,
+            medIdx: -1,
+            otcIdx: otcIdx,
+            name: otc.name.trim(),
+            dose: otc.dose || (otc.note && /정|캡슐|포|스틱|ml/i.test(otc.note) ? otc.note : '1회 1정/포'),
+            timing: otc.timing || otc.note || '',
+            shape: otc.shape || '',
+            imprint: otc.imprint || '',
+            imgUrl: otc.imgUrl || '',
+            isOtc: true
           };
-          timetableSlots[slotKey].push(slotItem);
+          timetableSlots[targetSlot].push(slotItem);
         });
-      });
+      }
 
       syncTimetableRowsFromSlots();
       renderTimetableEditor();
@@ -5911,7 +6257,7 @@
       autoSaveDraft();
 
       if (showToastAlert) {
-        showToast("처방약 복약 용법을 분석하여 24시간 복약 테이블에 자동 배치했습니다.", "✔");
+        showToast("처방약과 영양제를 24시간 복약 시간표에 자동 배치했습니다.", "✔");
       }
     }
 
@@ -6043,7 +6389,9 @@
 
     function ensureTimetableSlotsInitialized() {
       if (isTimetableSlotsEmpty()) {
-        if (Array.isArray(prescribedMeds) && prescribedMeds.length > 0) {
+        var hasMeds = Array.isArray(prescribedMeds) && prescribedMeds.length > 0;
+        var hasOtc = Array.isArray(otcMeds) && otcMeds.some(function(o) { return o && o.name && o.name.trim(); });
+        if (hasMeds || hasOtc) {
           autoGenerateTimetableFromMeds(false);
         } else if (Array.isArray(timetableRows) && timetableRows.length > 0) {
           initializeSlotsFromRows(timetableRows);
@@ -6184,16 +6532,31 @@
         cleanDose = '1정';
       }
 
+      var isPrescribed = (idx >= 0);
+      var isOtcItem = !isPrescribed || !!med.isOtc;
+
       var vectorHtml = (typeof buildVectorPillHtml === 'function') ? buildVectorPillHtml(med, false) : '';
+      if (isOtcItem && !med.imgUrl) {
+        vectorHtml = '<div class="flex flex-col items-center justify-center w-full h-full bg-amber-50 text-amber-700">' +
+          '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/></svg>' +
+        '</div>';
+      }
       var imgTag = med.imgUrl ? renderProtectedPillImage(med.imgUrl, cleanMedName) : '';
       var fallbackHiddenClass = med.imgUrl ? ' hidden' : '';
 
       var cardId = itemId || ('pill_card_' + idx + '_' + (slotKey || 'def'));
-      var isPrescribed = (idx >= 0);
       var popoverEvents = isPrescribed
         ? 'onclick="openPillDetailPopover(' + idx + ')" onmouseenter="showPillHoverTooltip(event, ' + idx + ')" onmouseleave="hidePillHoverTooltip()"'
         : '';
       var hoverTitle = escapeHtml(cleanMedName) + ' (마우스로 드래그하여 다른 복약 시간 칸으로 이동' + (isPrescribed ? ', 클릭 시 확대' : '') + ')';
+
+      var otcBadgeHtml = isOtcItem
+        ? '<span class="ml-1 px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-amber-50 text-amber-800 border border-amber-200 shrink-0">영양제</span>'
+        : '';
+
+      var doseBadgeClass = isOtcItem
+        ? 'font-bold text-amber-900 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 text-[11px] shrink-0'
+        : 'font-bold text-[#4F46E5] bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100 text-[11px] shrink-0';
 
       return '<div id="' + cardId + '" ' +
         'draggable="true" ' +
@@ -6208,8 +6571,9 @@
 
         // [1층 - 상단] 약품명 가로 100% 전폭 확보 + 우측 드래그 핸들 ('=')
         '<div class="w-full flex items-start justify-between gap-1.5 pointer-events-none">' +
-          '<div class="text-[13px] sm:text-[14px] font-extrabold text-[#202A3A] leading-snug break-keep flex-1" title="' + escapeHtml(cleanMedName) + '">' +
-            escapeHtml(cleanMedName) +
+          '<div class="text-[13px] sm:text-[14px] font-extrabold text-[#202A3A] leading-snug break-keep flex-1 flex items-center flex-wrap gap-1" title="' + escapeHtml(cleanMedName) + '">' +
+            '<span>' + escapeHtml(cleanMedName) + '</span>' +
+            otcBadgeHtml +
           '</div>' +
           '<div class="text-slate-300 group-hover:text-indigo-400 shrink-0 pt-0.5" title="드래그 가능">' +
             '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8h16M4 16h16"/></svg>' +
@@ -6225,7 +6589,7 @@
             '</div>' +
           '</div>' +
           '<div class="min-w-0 flex-1 flex items-center gap-1.5 text-[10px] text-[#536174] flex-wrap">' +
-            '<span class="font-bold text-[#4F46E5] bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100 text-[11px] shrink-0">1회 ' + escapeHtml(cleanDose) + '</span>' +
+            '<span class="' + doseBadgeClass + '">1회 ' + escapeHtml(cleanDose) + '</span>' +
             (imprintText && imprintText !== '—' ? ('<span class="text-slate-400 font-mono text-[10px] truncate">[' + imprintText + ']</span>') : '') +
           '</div>' +
         '</div>' +
@@ -6550,14 +6914,17 @@
         '</td>';
       }
 
-      var tableHtml = '<div class="overflow-x-auto -mx-1 sm:mx-0">' +
+      // -----------------------------------------------------------------------
+      // A. 데스크톱 & 인쇄용 테이블 뷰 (hidden sm:block print:block)
+      // -----------------------------------------------------------------------
+      var desktopTableHtml = '<div class="hidden sm:block print:block overflow-x-auto w-full -mx-1 sm:mx-0">' +
         '<div class="bg-indigo-50/60 border border-indigo-100 rounded-t-xl px-3.5 py-2 flex items-center justify-end text-xs border-b-0 no-print">' +
           '<button type="button" onclick="toggleTimetableExpand()" class="no-print inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-bold border transition shadow-2xs ' +
             (isTimetableManuallyExpanded ? 'bg-indigo-600 text-white border-indigo-700 hover:bg-indigo-700' : 'bg-white text-[#4F46E5] border-indigo-200 hover:bg-indigo-50') + '">' +
             (isTimetableManuallyExpanded ? '<span>− 빈 시간대 숨기기</span>' : '<span>+ 빈 시간대 모두 보기</span>') +
           '</button>' +
         '</div>' +
-        '<table class="w-full min-w-[540px] text-left border-collapse border border-[#E2E8F0] rounded-b-xl overflow-hidden bg-white shadow-2xs">' +
+        '<table class="w-full text-left border-collapse border border-[#E2E8F0] rounded-b-xl overflow-hidden bg-white shadow-2xs table-fixed">' +
           '<thead>' +
             '<tr class="bg-slate-100/90 border-b border-[#E2E8F0] text-xs text-[#202A3A]">' +
               '<th class="py-2.5 px-3 w-20 sm:w-24 font-extrabold border-r border-[#E2E8F0] text-center shrink-0">시간대</th>' +
@@ -6635,7 +7002,93 @@
         '</table>' +
       '</div>';
 
-      container.innerHTML = tableHtml;
+      // -----------------------------------------------------------------------
+      // B. 모바일 전용 시인성 극대화 스택 뷰 (block sm:hidden print:hidden)
+      //    스마트폰(360~390px) 화면에서 가로 잘림 0px, 식전 ➔ 식후 세로 순서 직관 배치
+      // -----------------------------------------------------------------------
+      function renderMobileSubSection(labelHtml, badgeClass, items, slotKey) {
+        if (!items || items.length === 0) return '';
+        var cardsHtml = items.map(function(item) {
+          var medIdx = item.medIdx;
+          var med = (medIdx >= 0 && prescribedMeds && prescribedMeds[medIdx]) ? prescribedMeds[medIdx] : {
+            name: item.name,
+            dose: item.dose,
+            shape: item.shape,
+            imprint: item.imprint,
+            imgUrl: item.imgUrl,
+            isOtc: item.isOtc
+          };
+          return buildTimetablePillCardHtml(med, medIdx, item.dose, 'm_' + item.id, slotKey);
+        }).join('');
+
+        return '<div class="space-y-1.5 pt-2 first:pt-0">' +
+          '<div class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-extrabold ' + badgeClass + '">' +
+            labelHtml +
+          '</div>' +
+          '<div class="grid grid-cols-1 gap-2">' + cardsHtml + '</div>' +
+        '</div>';
+      }
+
+      function renderMobileTimeCard(title, timeSub, hasAny, subSectionsHtml, isPrn) {
+        if (!hasAny && !isExpanded) return '';
+        var bgClass = isPrn ? 'bg-rose-50/20 border-rose-200' : 'bg-white border-[#E2E8F0]';
+        var titleColor = isPrn ? 'text-[#C62828]' : 'text-[#202A3A]';
+
+        return '<div class="rounded-xl border p-3 sm:p-4 space-y-2.5 shadow-2xs ' + bgClass + '">' +
+          '<div class="flex items-center justify-between pb-1.5 border-b border-slate-100">' +
+            '<div class="flex items-center gap-2">' +
+              '<span class="text-sm font-black ' + titleColor + '">' + title + '</span>' +
+              '<span class="text-[11px] text-[#536174] font-medium">' + timeSub + '</span>' +
+            '</div>' +
+          '</div>' +
+          (subSectionsHtml || '<div class="py-2 text-center text-xs text-slate-300">- 복용 약물 없음 -</div>') +
+        '</div>';
+      }
+
+      var mobileMorningParts = [
+        renderMobileSubSection('<span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>식전 (식사 30분 전 / 공복)', 'bg-amber-50 text-amber-800 border border-amber-200', mBefore, 'morning_before'),
+        renderMobileSubSection('<span class="w-1.5 h-1.5 rounded-full bg-[#4F46E5]"></span>식후 (즉시 ~ 30분 이내)', 'bg-indigo-50 text-[#4F46E5] border border-indigo-100', mAfter, 'morning_after'),
+        renderMobileSubSection('<span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>식사와 무관 (일정 시간 복용)', 'bg-emerald-50 text-emerald-800 border border-emerald-200', mNone, 'morning_none')
+      ].filter(Boolean).join('');
+
+      var mobileLunchParts = [
+        renderMobileSubSection('<span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>식전 (식사 30분 전 / 공복)', 'bg-amber-50 text-amber-800 border border-amber-200', lBefore, 'lunch_before'),
+        renderMobileSubSection('<span class="w-1.5 h-1.5 rounded-full bg-[#4F46E5]"></span>식후 (즉시 ~ 30분 이내)', 'bg-indigo-50 text-[#4F46E5] border border-indigo-100', lAfter, 'lunch_after'),
+        renderMobileSubSection('<span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>식사와 무관 (일정 시간 복용)', 'bg-emerald-50 text-emerald-800 border border-emerald-200', lNone, 'lunch_none')
+      ].filter(Boolean).join('');
+
+      var mobileDinnerParts = [
+        renderMobileSubSection('<span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>식전 (식사 30분 전 / 공복)', 'bg-amber-50 text-amber-800 border border-amber-200', dBefore, 'dinner_before'),
+        renderMobileSubSection('<span class="w-1.5 h-1.5 rounded-full bg-[#4F46E5]"></span>식후 (즉시 ~ 30분 이내)', 'bg-indigo-50 text-[#4F46E5] border border-indigo-100', dAfter, 'dinner_after'),
+        renderMobileSubSection('<span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>식사와 무관 (일정 시간 복용)', 'bg-emerald-50 text-emerald-800 border border-emerald-200', dNone, 'dinner_none')
+      ].filter(Boolean).join('');
+
+      var mobileBedtimeParts = [
+        renderMobileSubSection('<span class="w-1.5 h-1.5 rounded-full bg-indigo-700"></span>잠들기 30분 ~ 1시간 전 복용', 'bg-indigo-50 text-indigo-900 border border-indigo-200', btItems, 'bedtime')
+      ].filter(Boolean).join('');
+
+      var mobilePrnParts = [
+        renderMobileSubSection('<span class="w-1.5 h-1.5 rounded-full bg-[#C62828]"></span>증상 발생 시 의사·약사 지시대로 복용', 'bg-rose-50 text-[#C62828] border border-rose-200', prnItems, 'prn')
+      ].filter(Boolean).join('');
+
+      var mobileStackHtml = '<div class="block sm:hidden print:hidden space-y-3 pt-1">' +
+        '<div class="bg-indigo-50/60 border border-indigo-100 rounded-xl px-3 py-2 flex items-center justify-between text-xs mb-1.5">' +
+          '<span class="text-[11px] font-bold text-indigo-900 flex items-center gap-1.5">' +
+            '<span class="w-2 h-2 rounded-full bg-indigo-600"></span>' +
+            '<span>24시간 실천형 복약 시간표</span>' +
+          '</span>' +
+          '<button type="button" onclick="toggleTimetableExpand()" class="text-[10px] font-bold text-indigo-700 bg-white border border-indigo-200 px-2 py-0.5 rounded shadow-2xs hover:bg-indigo-50 transition">' +
+            (isTimetableManuallyExpanded ? '− 빈 시간 숨기기' : '+ 빈 시간 보기') +
+          '</button>' +
+        '</div>' +
+        renderMobileTimeCard('아침', '오전 복용', countMorning > 0, mobileMorningParts, false) +
+        renderMobileTimeCard('점심', '정오~오후', countLunch > 0, mobileLunchParts, false) +
+        renderMobileTimeCard('저녁', '일과 후', countDinner > 0, mobileDinnerParts, false) +
+        renderMobileTimeCard('취침전', '잠들기 전', countBedtime > 0, mobileBedtimeParts, false) +
+        renderMobileTimeCard('필요시', '의사지시대로', countPrn > 0, mobilePrnParts, true) +
+      '</div>';
+
+      container.innerHTML = desktopTableHtml + mobileStackHtml;
     }
 
         // =========================================================================
@@ -6706,17 +7159,29 @@
         var av = avoidParts[i] || avoidParts[0] || '자몽주스, 칼륨 함유 일반약 등';
         var ac = actionParts[i] || actionParts[0] || '처방약 복용 시 충분한 물과 함께 복용하세요.';
         var me = mechParts[i] || mechParts[0] || '간 대사 효소 경쟁 및 신장 배설 부담을 줄이기 위함입니다.';
+        
         var drugLabel = '처방약 전반';
-        var dMatch = av.match(/^\*\*([^*]+)\*\*[:：]?\s*(.*)$/);
+        var dMatch = av.match(/^(?:\*\*)?([^*:：\n]+?)(?:\*\*)?[:：]\s*(.*)$/);
         if (dMatch) {
-          drugLabel = dMatch[1];
+          drugLabel = dMatch[1].replace(/\*\*/g, '').trim();
           av = dMatch[2] || av;
         }
+
+        // action과 mechanism에서도 선행 약물명 패턴 완벽 제거
+        ac = ac.replace(/^(?:\*\*)?[^*:：\n]+?(?:\*\*)?[:：]\s*/, '').trim();
+        me = me.replace(/^(?:\*\*)?[^*:：\n]+?(?:\*\*)?[:：]\s*/, '').trim();
+
+        // 텍스트 내 잔존 ** 별표 및 문두 콜론 찌꺼기 전면 정제
+        av = av.replace(/\*\*/g, '').replace(/^[:：\s]+/, '').trim();
+        ac = ac.replace(/\*\*/g, '').replace(/^[:：\s]+/, '').trim();
+        me = me.replace(/\*\*/g, '').replace(/^[:：\s]+/, '').trim();
+
         items.push({
           drug: drugLabel,
-          avoid: av.replace(/\*\*/g, '').trim(),
-          action: ac.replace(/\*\*/g, '').trim(),
-          mechanism: me.replace(/\*\*/g, '').trim()
+          avoid: av,
+          action: ac,
+          mechanism: me,
+          included: true
         });
       }
 
@@ -6978,7 +7443,7 @@
         include_q4: true,
         suspect_drug: q4Parsed.suspect_drug || (drugProfiles[0] ? drugProfiles[0].name : '처방약'),
         pure_symptom: q4Parsed.pure_symptom || ptSym || '불편 증상',
-        q4_level: q4Parsed.level || 2,
+        q4_level: (document.getElementById('in_c4_level') && document.getElementById('in_c4_level').value ? parseInt(document.getElementById('in_c4_level').value, 10) : (q4Parsed.level || 2)),
         q4_judge: q4Parsed.judge || '호소하신 증상은 처방약 복용 초기 적응 과정에서 나타날 수 있는 반응입니다.',
         q4_reason: q4Parsed.reason || '약물이 체내 목표 수용체에 작용하면서 일시적으로 혈관이나 평활근이 이완되는 과정에서 유발될 수 있습니다.',
         q4_action: q4Parsed.action || '임의로 약을 중단하지 마시고 충분한 수분 섭취와 함께 안정을 취하시기 바랍니다.',
@@ -7102,7 +7567,7 @@
         include_q4: !document.getElementById('card_q4') || !document.getElementById('card_q4').classList.contains('hidden'),
         suspect_drug: q4Parsed.suspect_drug || (drugProfiles[0] ? drugProfiles[0].name : '처방약'),
         pure_symptom: q4Parsed.pure_symptom || ptSym || '불편 증상',
-        q4_level: q4Parsed.level || 2,
+        q4_level: (document.getElementById('in_c4_level') && document.getElementById('in_c4_level').value ? parseInt(document.getElementById('in_c4_level').value, 10) : (q4Parsed.level || 2)),
         q4_judge: q4Parsed.judge || '호소하신 증상은 처방약 복용 초기 적응 과정에서 나타날 수 있는 반응입니다.',
         q4_reason: q4Parsed.reason || '약물이 체내 목표 수용체에 작용하면서 일시적으로 혈관이나 평활근이 이완되는 과정에서 유발될 수 있습니다.',
         q4_action: q4Parsed.action || '임의로 약을 중단하지 마시고 충분한 수분 섭취와 함께 안정을 취하시기 바랍니다.',
@@ -7230,6 +7695,7 @@
       var milestones = (wizardState && wizardState.disease_milestones) ? wizardState.disease_milestones : [];
 
       var milestonesHtml = milestones.map(function(dm, idx) {
+        var isInc = (dm.included !== false);
         var stepNum = parseInt(dm.current_step, 10) || 2;
         var stages = (Array.isArray(dm.stages) && dm.stages.length >= 2) ? dm.stages : ['1단계', '2단계', '3단계', '4단계'];
 
@@ -7242,12 +7708,18 @@
           '</button>';
         }).join('');
 
-        return '<div class="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-3">' +
+        return '<div class="p-4 rounded-xl border transition space-y-3 ' +
+          (isInc ? 'bg-white border-slate-200 shadow-xs' : 'bg-slate-50/70 border-slate-200/80 opacity-60') + '">' +
           '<div class="flex items-start justify-between gap-2 flex-wrap pb-2 border-b border-slate-200">' +
             '<div>' +
               '<div class="flex items-center gap-2 flex-wrap">' +
                 '<span class="text-sm sm:text-base font-extrabold text-indigo-700">' + escapeHtml(dm.disease_category) + '</span>' +
                 '<span class="text-[11px] bg-slate-100 text-slate-700 border border-slate-200 px-2 py-0.5 rounded font-medium">' + escapeHtml(dm.guideline_org || '공식 진료지침') + '</span>' +
+                '<label class="inline-flex items-center gap-1 cursor-pointer text-[11px] font-bold px-2 py-0.5 rounded border transition ' +
+                  (isInc ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs' : 'bg-white text-slate-500 border-slate-300') + '">' +
+                  '<input type="checkbox" class="rounded text-indigo-600 focus:ring-0" ' + (isInc ? 'checked' : '') + ' onchange="toggleWizardMilestoneItem(' + idx + ', this.checked)">' +
+                  '<span>' + (isInc ? '✓ 회신서 포함' : '✕ 회신서 제외') + '</span>' +
+                '</label>' +
               '</div>' +
               (dm.included_drugs ? ('<div class="text-xs text-slate-500 mt-0.5">포함 처방약: <span class="text-slate-800 font-semibold">' + escapeHtml(dm.included_drugs) + '</span></div>') : '') +
             '</div>' +
@@ -7309,11 +7781,23 @@
         ? '<span class="text-xs bg-emerald-50 text-emerald-800 border border-emerald-200 px-2.5 py-0.5 rounded-full font-bold">✓ 상호 충돌 없음 · 처방 궁합 안전</span>'
         : '<span class="text-xs bg-amber-50 text-amber-800 border border-amber-200 px-2.5 py-0.5 rounded-full font-bold">⚠️ 병용 간격/주의 확인</span>';
 
-      var q2ItemsHtml = (wizardState && wizardState.q2_items ? wizardState.q2_items : []).map(function(item, idx) {
-        return '<div class="bg-white p-3 rounded-xl border border-slate-200 shadow-xs space-y-2">' +
-          '<div class="flex items-center justify-between text-xs">' +
-            '<span class="font-extrabold text-indigo-700 text-sm">' + escapeHtml(item.drug || '처방약') + '</span>' +
-            '<span class="text-[11px] text-slate-400 font-medium">주의사항 및 실천 대안</span>' +
+      var q2Items = (wizardState && wizardState.q2_items) ? wizardState.q2_items : [];
+      var includedQ2Count = q2Items.filter(function(it){ return it.included !== false; }).length;
+
+      var q2ItemsHtml = q2Items.map(function(item, idx) {
+        var isInc = (item.included !== false);
+        return '<div class="p-3 rounded-xl border transition space-y-2 ' +
+          (isInc ? 'bg-white border-slate-200 shadow-xs' : 'bg-slate-50/70 border-slate-200/80 opacity-60') + '">' +
+          '<div class="flex items-center justify-between text-xs flex-wrap gap-2">' +
+            '<div class="flex items-center gap-2">' +
+              '<span class="font-extrabold text-indigo-700 text-sm">' + escapeHtml(item.drug || '처방약') + '</span>' +
+              '<span class="text-[11px] text-slate-400 font-medium">주의사항 및 실천 대안</span>' +
+            '</div>' +
+            '<label class="inline-flex items-center gap-1.5 cursor-pointer text-[11px] font-bold px-2 py-0.5 rounded-lg border transition ' +
+              (isInc ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs' : 'bg-white text-slate-500 border-slate-300') + '">' +
+              '<input type="checkbox" class="rounded text-indigo-600 focus:ring-0" ' + (isInc ? 'checked' : '') + ' onchange="toggleWizardQ2Item(' + idx + ', this.checked)">' +
+              '<span>' + (isInc ? '✓ 회신서 포함' : '✕ 회신서 제외') + '</span>' +
+            '</label>' +
           '</div>' +
           '<div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">' +
             '<div class="p-2.5 rounded-lg bg-rose-50/60 border border-rose-200 space-y-1">' +
@@ -7385,13 +7869,14 @@
         // Q2 Food / Patch / Supplement DDI Block
         '<div class="bg-white p-4 rounded-xl border border-slate-200 shadow-xs space-y-3">' +
           '<div class="flex items-center justify-between flex-wrap gap-2 pb-2 border-b border-slate-200">' +
-            '<div class="flex items-center gap-2">' +
+            '<div class="flex items-center gap-2 flex-wrap">' +
               '<span class="px-2 py-0.5 rounded bg-indigo-600 text-white font-bold text-xs shadow-2xs">Q2</span>' +
               '<h4 class="font-extrabold text-sm text-slate-900">음식 / 파스 / 영양제 / 기저질환 주의사항</h4>' +
+              (q2Items.length > 0 ? ('<span class="text-[11px] font-extrabold text-indigo-600 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full">포함 ' + includedQ2Count + '/' + q2Items.length + '건</span>') : '') +
             '</div>' +
             '<label class="flex items-center gap-1.5 cursor-pointer text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1 rounded-md border border-indigo-200 transition">' +
               '<input type="checkbox" id="wiz_include_q2" ' + (wizardState && wizardState.include_q2 !== false ? 'checked' : '') + ' onchange="wizardState.include_q2 = this.checked">' +
-              '<span>회신서 포함</span>' +
+              '<span>Q2 전체 포함</span>' +
             '</label>' +
           '</div>' +
           '<div class="space-y-2.5">' + (q2ItemsHtml || '<div class="text-slate-400 text-xs py-2">등록된 주의 항목이 없습니다.</div>') + '</div>' +
@@ -7521,11 +8006,18 @@
           '</button>';
         }).join('');
 
-        return '<div class="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs space-y-3">' +
+        var isInc = (s.included !== false);
+        return '<div class="p-3.5 rounded-xl border transition space-y-3 ' +
+          (isInc ? 'bg-white border-slate-200 shadow-xs' : 'bg-slate-50/70 border-slate-200/80 opacity-60') + '">' +
           '<div class="flex items-center justify-between gap-1 flex-wrap pb-2 border-b border-slate-200">' +
-            '<div class="flex items-center gap-1.5">' +
+            '<div class="flex items-center gap-1.5 flex-wrap">' +
               '<span class="text-sm font-extrabold text-slate-900">' + escapeHtml(s.name) + '</span>' +
               (s.ingredient ? ('<span class="text-xs text-slate-500">(' + escapeHtml(s.ingredient) + ')</span>') : '') +
+              '<label class="inline-flex items-center gap-1 cursor-pointer text-[11px] font-bold px-2 py-0.5 rounded border transition ' +
+                (isInc ? 'bg-indigo-600 text-white border-indigo-600 shadow-2xs' : 'bg-white text-slate-500 border-slate-300') + '">' +
+                '<input type="checkbox" class="rounded text-indigo-600 focus:ring-0" ' + (isInc ? 'checked' : '') + ' onchange="toggleWizardSupplementItem(' + idx + ', this.checked)">' +
+                '<span>' + (isInc ? '✓ 회신서 포함' : '✕ 회신서 제외') + '</span>' +
+              '</label>' +
             '</div>' +
             '<div class="flex gap-1">' + safeButtonsHtml + '</div>' +
           '</div>' +
@@ -7922,22 +8414,42 @@
         if (Array.isArray(wizardState.q2_items)) {
           wizardState.q2_items.forEach(function(item, idx) {
             var avEl = document.querySelector('#wizardCardViewport [data-field="q2_avoid"][data-idx="' + idx + '"]');
-            if (avEl) item.avoid = avEl.innerText.trim();
+            if (avEl) item.avoid = avEl.innerText.replace(/\*\*/g, '').trim();
             var acEl = document.querySelector('#wizardCardViewport [data-field="q2_action"][data-idx="' + idx + '"]');
-            if (acEl) item.action = acEl.innerText.trim();
+            if (acEl) item.action = acEl.innerText.replace(/\*\*/g, '').trim();
             var meEl = document.querySelector('#wizardCardViewport [data-field="q2_mech"][data-idx="' + idx + '"]');
-            if (meEl) item.mechanism = meEl.innerText.trim();
+            if (meEl) item.mechanism = meEl.innerText.replace(/\*\*/g, '').trim();
           });
         }
-        var avoidParts = wizardState.q2_items.map(function(it){ return '**' + it.drug + ':** ' + it.avoid; }).join(' / ');
-        var mechParts = wizardState.q2_items.map(function(it){ return '**' + it.drug + ':** ' + it.mechanism; }).join(' / ');
-        var actionParts = wizardState.q2_items.map(function(it){ return '**' + it.drug + ':** ' + it.action; }).join(' / ');
+        var activeQ2Items = (wizardState.q2_items || []).filter(function(it){ return it.included !== false; });
+        if (activeQ2Items.length > 0) {
+          // avoidParts에만 약물명을 붙이고, action/mechanism에는 중복 약물명을 절대 붙이지 않음 (원천 차단)
+          var avoidParts = activeQ2Items.map(function(it){
+            return '**' + it.drug + ':** ' + it.avoid.replace(/^(?:\*\*)?[^*:：\n]+?(?:\*\*)?[:：]\s*/, '').trim();
+          }).join(' / ');
+          
+          var mechParts = activeQ2Items.map(function(it){
+            var cleanM = it.mechanism.replace(/^(?:\*\*)?[^*:：\n]+?(?:\*\*)?[:：]\s*/, '').replace(/\*\*/g, '').trim();
+            return cleanM;
+          }).join(' / ');
 
-        wizardState.q2_answer = '**' + (wizardState.q2_headline || '처방약 ↔ 병용 주의 요점') + '**\n' +
-          '• 주의 대상: ' + avoidParts + '\n' +
-          '• 발생 원리: ' + mechParts + '\n' +
-          '• 권장 수칙: ' + actionParts + '\n' +
-          '• 출처: 약학정보원(KPIC) · 식약처 의약품안전나라 · PubMed';
+          var actionParts = activeQ2Items.map(function(it){
+            var cleanA = it.action.replace(/^(?:\*\*)?[^*:：\n]+?(?:\*\*)?[:：]\s*/, '').replace(/\*\*/g, '').trim();
+            return cleanA;
+          }).join(' / ');
+
+          wizardState.q2_answer = '**' + (wizardState.q2_headline || '처방약 ↔ 병용 주의 요점') + '**\n' +
+            '• 주의 대상: ' + avoidParts + '\n' +
+            '• 발생 원리: ' + mechParts + '\n' +
+            '• 권장 수칙: ' + actionParts + '\n' +
+            '• 출처: 약학정보원(KPIC) · 식약처 의약품안전나라 · PubMed';
+        } else {
+          wizardState.q2_answer = '**' + (wizardState.q2_headline || '처방약 ↔ 병용 주의 요점') + '**\n' +
+            '• 주의 대상: 특별히 피해야 할 약물·음식 상호작용은 확인되지 않았습니다.\n' +
+            '• 발생 원리: 처방약의 체내 대사 경로 상 특별한 충돌 없이 안전하게 복용하실 수 있습니다.\n' +
+            '• 권장 수칙: 안내해 드린 복약 시간표에 맞추어 안심하고 복용을 유지하세요.\n' +
+            '• 출처: 약학정보원(KPIC) · 식약처 의약품안전나라 · PubMed';
+        }
 
       } else if (step === 4) {
         var chkQ4 = document.getElementById('wiz_include_q4');
@@ -8012,10 +8524,13 @@
 
         var q5Sections = [];
         if (wizardState.supplement_profiles && wizardState.supplement_profiles.length > 0) {
-          var sNames = wizardState.supplement_profiles.map(function(s){ return s.name; }).join(', ');
-          var sMechs = wizardState.supplement_profiles.map(function(s){ return '**' + s.name + ':** ' + (s.easy_benefit_summary || s.clinical_mechanism_note || s.step2_mechanism); }).join(' / ');
-          var sGuides = wizardState.supplement_profiles.map(function(s){ return '**' + s.name + ':** ' + (s.action_guidance || '처방약과 함께 복용하셔도 안전합니다.'); }).join(' / ');
-          q5Sections.push('**■ 현재 복용 중인 영양제·일반약 1:1 맞춤 점검 — ' + sNames + '**\n• 체내 약리 기전: ' + sMechs + '\n• 복용 및 안전 가이드: ' + sGuides);
+          var incSupps = wizardState.supplement_profiles.filter(function(s){ return s.included !== false; });
+          if (incSupps.length > 0) {
+            var sNames = incSupps.map(function(s){ return s.name; }).join(', ');
+            var sMechs = incSupps.map(function(s){ return '**' + s.name + ':** ' + (s.easy_benefit_summary || s.clinical_mechanism_note || s.step2_mechanism); }).join(' / ');
+            var sGuides = incSupps.map(function(s){ return '**' + s.name + ':** ' + (s.action_guidance || '처방약과 함께 복용하셔도 안전합니다.'); }).join(' / ');
+            q5Sections.push('**■ 현재 복용 중인 영양제·일반약 1:1 맞춤 점검 — ' + sNames + '**\n• 체내 약리 기전: ' + sMechs + '\n• 복용 및 안전 가이드: ' + sGuides);
+          }
         }
         if (wizardState.zone2_depletion_flow) {
           var z = wizardState.zone2_depletion_flow;
@@ -8079,11 +8594,78 @@
       renderWizardStepCard(2);
     }
 
+    function toggleWizardQ2Item(idx, isChecked) {
+      if (!wizardState || !wizardState.q2_items || !wizardState.q2_items[idx]) return;
+      wizardState.q2_items[idx].included = !!isChecked;
+      syncCurrentStepDomToWizardState(3);
+      renderWizardStepCard(3);
+
+      // 실시간 본문 textarea 및 우측 프리뷰 즉각 동기화 (개별 제외 즉시 체감)
+      if (document.getElementById('in_c2_answer')) {
+        document.getElementById('in_c2_answer').value = wizardState.q2_answer || '';
+      }
+      if (typeof syncAllFields === 'function') {
+        syncAllFields();
+      }
+    }
+
+    function toggleWizardMilestoneItem(idx, isChecked) {
+      if (!wizardState || !wizardState.disease_milestones || !wizardState.disease_milestones[idx]) return;
+      wizardState.disease_milestones[idx].included = !!isChecked;
+      syncCurrentStepDomToWizardState(2);
+      renderWizardStepCard(2);
+    }
+
+    function toggleWizardSupplementItem(idx, isChecked) {
+      if (!wizardState || !wizardState.supplement_profiles || !wizardState.supplement_profiles[idx]) return;
+      wizardState.supplement_profiles[idx].included = !!isChecked;
+      syncCurrentStepDomToWizardState(5);
+      renderWizardStepCard(5);
+
+      // 전역 c5SupplementProfiles 및 본문 in_c5_answer, 우측 프리뷰 실시간 즉시 동기화
+      c5SupplementProfiles = JSON.parse(JSON.stringify(wizardState.supplement_profiles.filter(function(s){ return s.included !== false; })));
+      if (document.getElementById('in_c5_answer')) {
+        document.getElementById('in_c5_answer').value = wizardState.q5_answer || '';
+      }
+      if (document.getElementById('pv_c5_answer')) {
+        document.getElementById('pv_c5_answer').innerHTML = attachPillBridgeBadges(renderQ5AnswerHtml(document.getElementById('in_c5_answer').value || ''));
+      }
+      if (typeof syncAllFields === 'function') {
+        syncAllFields();
+      }
+    }
+
     function setWizardStep4Level(lvl) {
       if (!wizardState) return;
+      lvl = parseInt(lvl, 10) || 2;
       wizardState.q4_level = lvl;
+
+      // 단계별 기본 연관 가능성 결론 문구 즉시 동기화
+      if (lvl === 1) {
+        wizardState.q4_judge = '처방약과의 직접적인 연관성 낮음 · 안심 복용 유지';
+      } else if (lvl === 3) {
+        wizardState.q4_judge = '처방약과의 연관성 높음 · 즉각 처방 조정 필요';
+      } else {
+        wizardState.q4_judge = '처방약과의 연관 가능성 확인 · 복약 관리 가능';
+      }
+
+      var jEl = document.getElementById('wiz_q4_judge');
+      if (jEl) jEl.innerText = wizardState.q4_judge;
+
       syncCurrentStepDomToWizardState(4);
       renderWizardStepCard(4);
+
+      // 본문 textarea, hidden input 및 우측 프리뷰 즉각 실시간 동기화
+      if (document.getElementById('in_c4_answer')) {
+        document.getElementById('in_c4_answer').value = wizardState.q4_answer || '';
+      }
+      var c4LvlInput = document.getElementById('in_c4_level');
+      if (c4LvlInput) {
+        c4LvlInput.value = String(lvl);
+      }
+      if (typeof syncAllFields === 'function') {
+        syncAllFields();
+      }
     }
 
     function toggleWizardCausality(idx, isChecked) {
@@ -8094,9 +8676,40 @@
 
     function setWizardStep5Safety(idx, lvl) {
       if (!wizardState || !wizardState.supplement_profiles || !wizardState.supplement_profiles[idx]) return;
-      wizardState.supplement_profiles[idx].safety_level = lvl;
+      var item = wizardState.supplement_profiles[idx];
+      item.safety_level = lvl;
+
+      if (lvl === 'SAFE') {
+        item.status_label = '처방약과 궁합 안전 · 복용 유지';
+        item.action_guidance = '처방약과 충돌 없이 안전하므로 상용량 범위 내에서 정해진 용법대로 복용을 유지하세요.';
+      } else if (lvl === 'CAUTION') {
+        item.status_label = '주의 · 복용 조절 필요';
+        item.action_guidance = '처방약과의 흡수 간섭이나 약효 영향을 줄이기 위해 복용 간격을 1~2시간 이상 분리하여 복용하세요.';
+      } else if (lvl === 'CONTRAINDICATED' || lvl === 'STOP') {
+        item.status_label = '처방약과 충돌 · 즉시 복용 중단';
+        item.action_guidance = '처방약의 분해 효소 간섭 및 약효 상충 위험이 있으므로 즉시 복용을 중단하시고 주치의와 상의하세요.';
+      }
+
+      // DOM의 guidance 입력 요소도 새 안내문구로 즉시 갱신 (sync에서 덮어쓰여지는 것 방지)
+      var guiEl = document.querySelector('#wizardCardViewport [data-field="supp_guidance"][data-idx="' + idx + '"]');
+      if (guiEl) {
+        guiEl.innerText = item.action_guidance;
+      }
+
       syncCurrentStepDomToWizardState(5);
       renderWizardStepCard(5);
+
+      // 전역 c5SupplementProfiles 및 본문 in_c5_answer, 우측 프리뷰 실시간 동기화
+      c5SupplementProfiles = JSON.parse(JSON.stringify(wizardState.supplement_profiles.filter(function(s){ return s.included !== false; })));
+      if (document.getElementById('in_c5_answer')) {
+        document.getElementById('in_c5_answer').value = wizardState.q5_answer || '';
+      }
+      if (document.getElementById('pv_c5_answer')) {
+        document.getElementById('pv_c5_answer').innerHTML = attachPillBridgeBadges(renderQ5AnswerHtml(document.getElementById('in_c5_answer').value || ''));
+      }
+      if (typeof syncAllFields === 'function') {
+        syncAllFields();
+      }
     }
 
     function setWizardStep6Traffic(color) {
@@ -9750,7 +10363,7 @@
         document.getElementById('in_c1_answer').value = wizardState.c1_answer || '';
       }
       if (Array.isArray(wizardState.disease_milestones) && wizardState.disease_milestones.length > 0) {
-        c1DiseaseMilestones = JSON.parse(JSON.stringify(wizardState.disease_milestones));
+        c1DiseaseMilestones = JSON.parse(JSON.stringify(wizardState.disease_milestones.filter(function(dm){ return dm.included !== false; })));
         var stepSelect = document.getElementById('in_c1_stage_step');
         if (stepSelect && c1DiseaseMilestones[0] && c1DiseaseMilestones[0].current_step) {
           stepSelect._autoSetting = true;
@@ -9784,6 +10397,10 @@
         if (document.getElementById('in_c4_answer')) {
           document.getElementById('in_c4_answer').value = wizardState.q4_answer || '';
         }
+        var c4LvlInput = document.getElementById('in_c4_level');
+        if (c4LvlInput && wizardState.q4_level) {
+          c4LvlInput.value = String(wizardState.q4_level);
+        }
         if (document.getElementById('card_q4')) document.getElementById('card_q4').classList.remove('hidden');
       } else if (document.getElementById('card_q4')) {
         document.getElementById('card_q4').classList.add('hidden');
@@ -9792,7 +10409,7 @@
       // 5. Q5
       if (wizardState.include_q5 !== false) {
         if (Array.isArray(wizardState.supplement_profiles) && wizardState.supplement_profiles.length > 0) {
-          c5SupplementProfiles = JSON.parse(JSON.stringify(wizardState.supplement_profiles));
+          c5SupplementProfiles = JSON.parse(JSON.stringify(wizardState.supplement_profiles.filter(function(s){ return s.included !== false; })));
         }
         if (wizardState.zone2_depletion_flow) {
           c5Zone2Flow = JSON.parse(JSON.stringify(wizardState.zone2_depletion_flow));
@@ -9961,19 +10578,53 @@
 
       document.getElementById('pv_c1_title').innerText = (document.getElementById('in_c1_title').value || '치료 단계 안내').replace(/\[|\]/g, '');
       document.getElementById('pv_c1_answer').innerHTML = attachPillBridgeBadges(formatPreviewHtml(document.getElementById('in_c1_answer').value || '표준 가이드라인에 따른 최적 처방입니다.', false));
+
+      // Q1 summary chip 텍스트 항상 컴팩트하게 정규화 ('📍 X단계' 등)
+      var c1Chip = document.getElementById('pv_c1_summary_chip');
+      if (c1Chip) {
+        var rawChip = (c1Chip.textContent || '').trim();
+        var stepMatch = rawChip.match(/(\d+단계)/);
+        if (stepMatch) {
+          c1Chip.innerText = '📍 ' + stepMatch[1];
+        } else {
+          var stepSel = document.getElementById('in_c1_stage_step');
+          var stVal = (stepSel && stepSel.value) ? stepSel.value : '2';
+          c1Chip.innerText = '📍 ' + stVal + '단계';
+        }
+      }
+
       document.getElementById('pv_c2_answer').innerHTML = attachPillBridgeBadges(renderQ2AnswerHtml(document.getElementById('in_c2_answer').value || '특별히 피해야 할 약물 상호작용은 확인되지 않았습니다.'));
       document.getElementById('pv_c3_answer').innerHTML = attachPillBridgeBadges(renderQ3AnswerHtml(document.getElementById('in_c3_answer').value || '현재 드시는 약제 간에는 상호 충돌이 없습니다.'));
 
-      // Q4(부작용 인과성) 3단계 스케일 바 연동: GREEN & 증상 없음 -> 1단계, RED -> 3단계, 그 외(YELLOW 등) -> 2단계
-      var topSym = (document.getElementById('in_top_symptom').value || '').trim();
+      // Q4(부작용 인과성) 3단계 스케일 바 연동
+      // 1순위: wizardState.q4_level (위저드 모달에서 약사가 직접 선택한 단계)
+      // 2순위: in_c4_level hidden input (저장된 단계)
+      // 3순위: in_c4_answer 본문 키워드 정밀 분석
+      // 4순위: trafficLight 및 환자 증상 기반 fallback
+      var c4AnswerVal = (document.getElementById('in_c4_answer') ? document.getElementById('in_c4_answer').value : '').trim();
+      var c4LevelInput = document.getElementById('in_c4_level');
+      var topSym = (document.getElementById('in_top_symptom') ? document.getElementById('in_top_symptom').value : '').trim();
       var isNoSymptom = (!topSym || topSym === '없음' || topSym === '특이 증상 없음' || topSym === '특이사항 없음');
+
       var q4Level = 2;
-      if (trafficLight === 'GREEN' && isNoSymptom) {
+      if (wizardState && wizardState.q4_level) {
+        q4Level = parseInt(wizardState.q4_level, 10) || 2;
+      } else if (c4LevelInput && c4LevelInput.value) {
+        q4Level = parseInt(c4LevelInput.value, 10) || 2;
+      } else if (/연관성\s*낮음|낮은\s*연관성|가능성\s*낮음|직접적인\s*연관성\s*낮음|관련성\s*낮음/.test(c4AnswerVal)) {
+        q4Level = 1;
+      } else if (/즉각\s*조정|즉각\s*처방|복용\s*중단|위험\s*신호/.test(c4AnswerVal)) {
+        q4Level = 3;
+      } else if (trafficLight === 'GREEN' && isNoSymptom) {
         q4Level = 1;
       } else if (trafficLight === 'RED') {
         q4Level = 3;
       } else {
         q4Level = 2;
+      }
+
+      if (c4LevelInput) {
+        c4LevelInput.value = String(q4Level);
       }
 
       document.getElementById('pv_c4_answer').innerHTML = attachPillBridgeBadges(renderQ4AnswerHtml(
@@ -10024,34 +10675,69 @@
       var customQText = document.getElementById('in_custom_question_text').value || '직접 작성하신 질문';
       var customAText = document.getElementById('in_custom_answer_text').value || '약사의 맞춤 소견을 확인하세요.';
       document.getElementById('pv_custom_q_title').innerText = customQText;
-      document.getElementById('pv_custom_answer_text').innerHTML = renderAnswerStructuredHtml(customAText);
+      document.getElementById('pv_custom_answer_text').innerHTML = attachPillBridgeBadges(renderAnswerStructuredHtml(customAText));
 
       var pickQ = document.getElementById('in_patient_1pick_question').value;
       var questionSummaryEl = document.getElementById('pv_picked_question_summary');
 
+      // [동적 순서 재배치: 환자 1순위 질문 카드를 최상단으로 이동]
+      var qCardContainer = document.getElementById('card_custom') ? document.getElementById('card_custom').parentElement : null;
+      var targetTopCard = null;
+
       if (pickQ === 'custom') {
         if (questionSummaryEl) questionSummaryEl.innerText = '"' + customQText + '"';
-        document.getElementById('card_custom').style.display = 'block';
-        document.getElementById('card_custom').open = true;
+        var customCard = document.getElementById('card_custom');
+        if (customCard) {
+          customCard.style.display = 'block';
+          targetTopCard = customCard;
+        }
       } else {
-        document.getElementById('card_custom').style.display = 'none';
+        if (document.getElementById('card_custom')) {
+          document.getElementById('card_custom').style.display = 'none';
+        }
         var qSel = document.getElementById('in_patient_1pick_question');
         var opt = qSel.selectedOptions ? qSel.selectedOptions[0] : null;
         if (questionSummaryEl) questionSummaryEl.innerText = opt ? opt.text : '-';
+        targetTopCard = document.getElementById('card_' + pickQ);
       }
 
-      ['q1', 'q2', 'q3', 'q4', 'q5'].forEach(function(q) {
+      // 모든 Q 카드 상태 업데이트 및 1순위 배지 부착
+      var allQCards = ['q1', 'q2', 'q3', 'q4', 'q5'];
+      allQCards.forEach(function(q) {
         var details = document.getElementById('card_' + q);
         if (details) {
           var isSelected = (q === pickQ);
           details.open = isSelected;
+          
+          var badgeEl = details.querySelector('.top-priority-badge');
           if (isSelected) {
-            details.classList.add('border-[#4F46E5]', 'ring-1', 'ring-[#4F46E5]');
+            details.classList.add('border-[#4F46E5]', 'ring-2', 'ring-[#4F46E5]/20', 'shadow-xs');
+            if (!badgeEl) {
+              var summaryHeader = details.querySelector('summary > div');
+              if (summaryHeader) {
+                var newBadge = document.createElement('span');
+                newBadge.className = 'top-priority-badge text-[11px] font-extrabold px-2 py-0.5 rounded bg-[#4F46E5] text-white shrink-0 mr-1';
+                newBadge.innerText = '환자 1순위 질문';
+                summaryHeader.insertBefore(newBadge, summaryHeader.firstChild);
+              }
+            }
           } else {
-            details.classList.remove('border-[#4F46E5]', 'ring-1', 'ring-[#4F46E5]');
+            details.classList.remove('border-[#4F46E5]', 'ring-2', 'ring-[#4F46E5]/20', 'shadow-xs');
+            if (badgeEl) badgeEl.remove();
           }
         }
       });
+
+      // 선택된 카드를 아코디언 목록 최상단(1위)으로 이동 (섹션 제목 바로 아래)
+      if (qCardContainer && targetTopCard) {
+        var secHeader = qCardContainer.querySelector('.flex.items-baseline');
+        var topRef = (secHeader && secHeader.nextElementSibling) ? secHeader.nextElementSibling : qCardContainer.firstElementChild;
+        if (topRef && topRef !== targetTopCard) {
+          qCardContainer.insertBefore(targetTopCard, topRef);
+        } else if (!topRef && qCardContainer.firstElementChild !== targetTopCard) {
+          qCardContainer.insertBefore(targetTopCard, qCardContainer.firstElementChild);
+        }
+      }
 
       document.getElementById('pv_evidence_stage').innerText = (document.getElementById('in_evidence_stage').value || '').replace(/\[|\]/g, '');
       document.getElementById('pv_evidence_adr').innerText = (document.getElementById('in_evidence_adr').value || '').replace(/\[|\]/g, '');
