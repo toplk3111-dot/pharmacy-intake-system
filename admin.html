@@ -171,7 +171,8 @@
     let allIntakes = [];
     let selectedIndex = -1;
     let currentPhotos = [];
-    let selectedPhotoIndex = 0;
+    let selectedPhotoIndices = [0]; // 다중 사진 OCR 선택 (알약 앞·뒷면 동시 분석)
+    let selectedPhotoIndex = 0; // 하위 호환 단일 인덱스
     let currentConfirmedMeds = [];
     let currentConfirmedOtc = []; // 확정 영양제·일반약·건기식 관리 배열
     let editingMedIndex = -1; // 현재 부분 수정(오탈자 편집) 중인 약품 인덱스
@@ -226,7 +227,8 @@
       drafts[patient.id] = {
         confirmedMeds: currentConfirmedMeds || [],
         confirmedOtc: currentConfirmedOtc || [], // 영양제 임시저장 보존
-        selectedPhotoIndex: selectedPhotoIndex || 0,
+        selectedPhotoIndices: selectedPhotoIndices || [0],
+        selectedPhotoIndex: (selectedPhotoIndices && selectedPhotoIndices[0]) || 0,
         tempName: nameInput ? nameInput.value : '',
         tempDose: doseInput ? doseInput.value : '1정',
         tempFreq: freqSelect ? freqSelect.value : '1일 1회',
@@ -311,6 +313,7 @@
 
       editingMedIndex = -1;
       currentConfirmedMeds = [];
+      selectedPhotoIndices = [0];
       selectedPhotoIndex = 0;
       if (patient.direct_meds && Array.isArray(patient.direct_meds) && patient.direct_meds.length > 0) {
         currentConfirmedMeds = patient.direct_meds
@@ -526,10 +529,18 @@
         const draft = drafts[item.id];
         currentConfirmedMeds = draft.confirmedMeds ? draft.confirmedMeds.slice() : [];
         currentConfirmedOtc = draft.confirmedOtc ? draft.confirmedOtc.slice() : [];
-        selectedPhotoIndex = draft.selectedPhotoIndex || 0;
+        if (draft.selectedPhotoIndices && Array.isArray(draft.selectedPhotoIndices)) {
+          selectedPhotoIndices = draft.selectedPhotoIndices.slice();
+        } else if (typeof draft.selectedPhotoIndex === 'number') {
+          selectedPhotoIndices = [draft.selectedPhotoIndex];
+        } else {
+          selectedPhotoIndices = (currentPhotos.length > 0) ? [0] : [];
+        }
+        selectedPhotoIndex = selectedPhotoIndices[0] || 0;
       } else {
         currentConfirmedMeds = [];
         currentConfirmedOtc = [];
+        selectedPhotoIndices = (currentPhotos.length > 0) ? [0] : [];
         selectedPhotoIndex = 0;
         if (item && item.direct_meds && Array.isArray(item.direct_meds) && item.direct_meds.length > 0) {
           currentConfirmedMeds = item.direct_meds
@@ -766,7 +777,13 @@
             .select('item_seq, item_name, entp_name, chart, item_image, print_front, print_back, drug_shape, color_class1');
 
           if (f && b) {
-            query = query.ilike('print_front', '%' + f + '%').ilike('print_back', '%' + b + '%');
+            // 앞면 f & 뒷면 b 뿐 아니라, 촬영 각도상 앞뒤가 반대로 인식된 경우도 포괄
+            query = query.or(
+              'and(print_front.ilike.%' + f + '%,print_back.ilike.%' + b + '%),' +
+              'and(print_front.ilike.%' + b + '%,print_back.ilike.%' + f + '%),' +
+              'print_front.ilike.%' + f + '%,' +
+              'print_back.ilike.%' + b + '%'
+            );
           } else {
             const imp = f || b;
             query = query.or('print_front.ilike.%' + imp + '%,print_back.ilike.%' + imp + '%');
@@ -875,25 +892,51 @@
         return;
       }
 
-      const targetPhoto = currentPhotos[selectedPhotoIndex];
-      if (!targetPhoto || !targetPhoto.dataUrl) {
-        alert("분석할 사진을 선택해 주세요.");
+      // 선택된 사진 목록 수집 (단일 또는 다중 앞·뒷면 사진)
+      const validIndices = selectedPhotoIndices.filter(function(idx) {
+        return idx >= 0 && idx < currentPhotos.length && currentPhotos[idx] && currentPhotos[idx].dataUrl;
+      });
+
+      if (validIndices.length === 0) {
+        alert("분석할 사진을 최소 1장 이상 선택해 주세요. (알약 앞·뒷면 사진을 함께 체크하시면 통합 분석됩니다.)");
         return;
       }
 
       const spinner = document.getElementById('ocrLoadingSpinner');
       const btn = document.getElementById('btnRunOcr');
+      const spinnerText = document.getElementById('ocrLoadingText');
+      if (spinnerText) {
+        spinnerText.innerText = `선택된 사진(${validIndices.length}장)의 활자 및 낱알 앞·뒷면 각인을 통합 판독하는 중입니다...`;
+      }
       spinner.classList.remove('hidden');
       btn.disabled = true;
 
       try {
-        const compressedDataUrl = await compressImageForAi(targetPhoto.dataUrl);
-        const base64Data = compressedDataUrl.split(',')[1];
+        // 모든 선택된 사진을 병렬로 압축
+        const compressedPhotos = await Promise.all(validIndices.map(async function(idx) {
+          const photo = currentPhotos[idx];
+          const compressedDataUrl = await compressImageForAi(photo.dataUrl);
+          return {
+            name: photo.name || ('사진 ' + (idx + 1)),
+            base64Data: compressedDataUrl.split(',')[1]
+          };
+        }));
 
-        // 지능형 2-트랙 및 낱알식별 특징 추출 프롬프트
+        // 다중 사진 및 낱알 앞·뒷면 통합 추출 프롬프트
         const prompt = [
           "당신은 대한민국 병원 및 약국의 문서·의약품·건강기능식품 판독 전문 수석약사입니다.",
-          "제공된 이미지(처방전, 조제 약봉투, 일반의약품 겉포장 상자, 건강기능식품/영양제 라벨 병, 파스 포장지, 조제 영수증, 낱알 알약 실물 사진 등)를 정밀 분석하여 의약품 및 영양제 목록을 추출하세요.",
+          `제공된 ${compressedPhotos.length}장의 이미지(처방전, 조제 약봉투, 일반의약품 겉포장 상자, 건강기능식품/영양제 라벨 병, 파스 포장지, 조제 영수증, 낱알 알약 실물 사진 등)를 종합 정밀 분석하여 의약품 및 영양제 목록을 추출하세요.`,
+          "",
+          "[다중 사진 및 낱알 앞·뒷면 통합 분석 핵심 원칙]",
+          "1. 여러 장의 이미지가 제공된 경우, 독립된 개별 사진으로만 보지 말고 상호 보완적인 정보로 통합하여 분석하세요.",
+          "2. [동일 알약 앞·뒷면 통합]:",
+          "   - 동일한 알약의 앞면 사진과 뒷면 사진이 함께 제공되었거나, 여러 각도에서 촬영된 경우, 각 사진의 시각 정보를 종합하여 1개의 알약 특징(pill_features)으로 결합하세요.",
+          "   - 예: 사진 1에서 앞면 각인 'DW', 사진 2에서 뒷면 각인 '10'이 확인된 경우 -> imprint: 'DW', imprint_back: '10'으로 1개의 pill_features 항목에 기록합니다.",
+          "   - 형태(shape)와 색상(color)도 일치하는 동일 알약은 절대 중복으로 생성하지 말고 하나로 통합합니다.",
+          "3. [약봉투/처방전 + 낱알 사진이 함께 있는 경우]:",
+          "   - 약봉투 활자에 인쇄된 약품명이 있는 경우 prescription_meds로 정확히 추출하세요.",
+          "   - 약봉투에 적힌 약품과 동일한 실물 알약 사진인 경우 중복 등록을 방지하기 위해 pill_features에는 넣지 마세요.",
+          "   - 약봉투에 없는 별도의 낱알(예: 환자가 추가로 복용하는 다른 약의 낱알 실물)인 경우에만 pill_features로 추출합니다.",
           "",
           "[추출 및 자동 분류 절대 규칙]",
           "이미지에 나타난 품목을 성격에 따라 반드시 아래 3개 그룹으로 명확히 구분하여 출력하세요:",
@@ -908,9 +951,9 @@
           "3. pill_features (인쇄 활자 없이 알약 실물만 찍힌 경우의 시각 특징):",
           "   - 약봉투나 처방전 활자 없이 오직 낱알(알약) 실물만 찍힌 사진일 때 시각적으로 확인되는 객관적 팩트만 추출합니다.",
           "   - 통계적 추측으로 유명 약품명을 지어내지 마세요(환각 절대 금지). 오직 눈에 보이는 각인, 형태, 색상만 추출합니다.",
-          "   - imprint(알약 앞면 각인), imprint_back(알약 뒷면 보조 각인), shape(모양: 원형, 타원형, 장방형 등), color(색상: 하양, 노랑, 주황 등), estimated_dose(추정 1회량, 기본 '1정')",
-          "   - 동일 알약의 앞·뒷면을 찍은 사진이라면 1개의 알약 특징으로 결합하세요.",
-          "   - 중요: 약봉투 위에 인쇄된 약품명이 이미 prescription_meds로 모두 추출된 사진이라면 중복 등록 방지를 위해 pill_features는 반드시 빈 배열([])로 반환하세요.",
+          "   - imprint(알약 앞면 각인), imprint_back(알약 뒷면 보조 각인 또는 분할선), shape(모양: 원형, 타원형, 장방형 등), color(색상: 하양, 노랑, 주황 등), estimated_dose(추정 1회량, 기본 '1정')",
+          "   - 중요: 동일 알약의 앞·뒷면을 찍은 사진이라면 반드시 1개의 알약 특징으로 결합하세요.",
+          "   - 약봉투 위에 인쇄된 약품명이 이미 prescription_meds로 모두 추출된 사진이라면 중복 등록 방지를 위해 pill_features는 반드시 빈 배열([])로 반환하세요.",
           "",
           "반드시 마크다운 기호 없이 순수 JSON 객체만 출력하세요:",
           "{",
@@ -921,31 +964,32 @@
           '    { "name": "오메가3", "note": "1일 1회 식후" }',
           '  ],',
           '  "pill_features": [',
-          '    { "imprint": "C73", "imprint_back": "", "shape": "원형", "color": "하양", "estimated_dose": "1정" }',
+          '    { "imprint": "DW", "imprint_back": "10", "shape": "원형", "color": "하양", "estimated_dose": "1정" }',
           '  ]',
           "}"
         ].join("\n");
 
         const url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=" + apiKey;
         const controller = new AbortController();
-        const timeoutId = setTimeout(function() { controller.abort(); }, 35000);
+        const timeoutId = setTimeout(function() { controller.abort(); }, 45000);
+
+        // 멀티모달 parts: 텍스트 프롬프트 + 선택된 모든 이미지 순차 첨부
+        const parts = [{ text: prompt }];
+        compressedPhotos.forEach(function(item) {
+          parts.push({
+            inlineData: {
+              mimeType: "image/jpeg",
+              data: item.base64Data
+            }
+          });
+        });
 
         const response = await fetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           signal: controller.signal,
           body: JSON.stringify({
-            contents: [{
-              parts: [
-                { text: prompt },
-                {
-                  inlineData: {
-                    mimeType: "image/jpeg",
-                    data: base64Data
-                  }
-                }
-              ]
-            }]
+            contents: [{ parts: parts }]
           })
         });
 
@@ -1099,9 +1143,9 @@
         if (addedOtcCount > 0) msg.push(`영양제·일반약 ${addedOtcCount}개 [영양제·건기식 목록] 자동 분류 등록`);
         
         if (msg.length === 0) {
-          alert("사진에서 새로운 약품이나 영양제를 찾지 못했습니다. 사진이 선명한지 확인해 주세요.");
+          alert(`선택된 사진(${compressedPhotos.length}장)에서 새로운 약품이나 영양제를 찾지 못했습니다. 사진이 선명한지 확인해 주세요.`);
         } else {
-          alert("판독 완료!\n• " + msg.join("\n• "));
+          alert(`판독 완료! (분석 사진: ${compressedPhotos.length}장)\n• ` + msg.join("\n• "));
         }
 
       } catch (err) {
@@ -1562,14 +1606,18 @@
         photosHtml = `
           <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
             ${currentPhotos.map(function(p, pIdx) {
-              const isSelected = pIdx === selectedPhotoIndex;
-              const borderStyle = isSelected ? 'ring-2 ring-indigo-500 bg-indigo-50' : 'border-slate-200 bg-white opacity-80';
+              const isSelected = selectedPhotoIndices.includes(pIdx);
+              const selOrder = isSelected ? (selectedPhotoIndices.indexOf(pIdx) + 1) : null;
+              const borderStyle = isSelected 
+                ? 'ring-2 ring-indigo-600 bg-indigo-50/70 border-indigo-300 shadow-xs' 
+                : 'border-slate-200 bg-white opacity-85 hover:opacity-100 hover:border-indigo-300';
               return `
-                <div class="border rounded-xl overflow-hidden p-2 transition cursor-pointer group relative ${borderStyle}" onclick="selectOcrPhoto(${pIdx})">
+                <div class="border rounded-xl overflow-hidden p-2 transition cursor-pointer group relative ${borderStyle}" onclick="toggleOcrPhoto(${pIdx}, event)">
                   <div class="flex items-center justify-between mb-1.5">
-                    <label class="inline-flex items-center gap-1 text-[11px] font-bold text-slate-700 cursor-pointer">
-                      <input type="radio" name="ocrPhotoRadio" ${isSelected ? 'checked' : ''} class="w-3.5 h-3.5 text-indigo-600">
-                      <span>OCR 대상</span>
+                    <label class="inline-flex items-center gap-1.5 text-[11px] font-bold text-slate-700 cursor-pointer" onclick="event.stopPropagation()">
+                      <input type="checkbox" ${isSelected ? 'checked' : ''} onchange="toggleOcrPhoto(${pIdx}, event)" class="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500 cursor-pointer">
+                      <span class="${isSelected ? 'text-indigo-700 font-extrabold' : ''}">OCR 대상</span>
+                      ${isSelected ? `<span class="text-[9px] px-1 py-0.2 bg-indigo-600 text-white rounded font-mono font-bold">#${selOrder}</span>` : ''}
                     </label>
                     <button type="button" onclick="openLightboxPhoto(${pIdx}, event)" class="p-1 rounded bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-semibold" title="사진 확대">
                       🔍 확대
@@ -1775,32 +1823,53 @@
 
         <!-- 첨부 사진 목록 및 약봉투 OCR 패널 -->
         <div>
-          <div class="flex items-center justify-between mb-2">
-            <h3 class="text-xs sm:text-sm font-bold text-slate-900">
-              첨부 사진 목록 (${currentPhotos.length}장)
-            </h3>
-            <span class="text-[11px] text-slate-500">약봉투나 처방전 사진을 클릭하여 선택하세요.</span>
+          <div class="flex items-center justify-between mb-2 flex-wrap gap-1.5">
+            <div class="flex items-center gap-2">
+              <h3 class="text-xs sm:text-sm font-bold text-slate-900">
+                첨부 사진 목록 (${currentPhotos.length}장)
+              </h3>
+              <span class="text-[11px] font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-100">
+                ${selectedPhotoIndices.length}장 선택됨
+              </span>
+            </div>
+            <div class="flex items-center gap-1.5">
+              <button type="button" onclick="selectAllOcrPhotos()" class="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 bg-white border border-indigo-200 px-2 py-0.5 rounded hover:bg-indigo-50 transition">
+                ✓ 전체 선택
+              </button>
+              <button type="button" onclick="deselectAllOcrPhotos()" class="text-[11px] font-medium text-slate-500 hover:text-slate-700 bg-white border border-slate-200 px-2 py-0.5 rounded hover:bg-slate-50 transition">
+                선택 해제
+              </button>
+            </div>
           </div>
+          <p class="text-[11px] text-slate-500 mb-2">
+            💡 <strong>낱알 앞·뒷면 사진</strong>이나 여러 장의 처방전/약봉투를 <strong>동시에 체크</strong>하시면 AI가 앞뒷면 각인과 활자를 한 번에 통합 분석합니다.
+          </p>
           ${photosHtml}
         </div>
 
-        <!-- 약봉투/처방전 텍스트 자동 인식 액션 바 -->
+        <!-- 약봉투/처방전/낱알 텍스트 자동 인식 액션 바 -->
         <div class="p-3 bg-indigo-50 border border-indigo-200 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-2.5 text-xs">
           <div class="flex items-center gap-2">
-            <span class="w-6 h-6 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-bold text-xs">📄</span>
+            <span class="w-6 h-6 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-bold text-xs shrink-0">📄</span>
             <div>
-              <p class="font-bold text-indigo-900 text-xs sm:text-sm">약봉투 또는 처방전 텍스트 자동 읽기 (OCR)</p>
-              <p class="text-slate-500 text-[11px]">선택된 사진의 활자(약품명·1회투여량·용법)를 AI가 2초 만에 읽어 등록합니다.</p>
+              <p class="font-bold text-indigo-900 text-xs sm:text-sm">약봉투·처방전·낱알 앞뒤 사진 AI 자동 판독 (OCR)</p>
+              <p class="text-slate-500 text-[11px]">
+                ${selectedPhotoIndices.length > 1 
+                  ? `선택된 <strong class="text-indigo-700 font-bold">${selectedPhotoIndices.length}장</strong>의 사진(앞·뒷면 각인 등)을 결합하여 복용약 목록을 통합 추출합니다.`
+                  : '선택된 사진의 활자(약품명·1회투여량·용법)와 낱알 각인을 AI가 읽어 등록합니다.'}
+              </p>
             </div>
           </div>
           <button type="button" id="btnRunOcr" onclick="runPrescriptionOcr()" class="w-full sm:w-auto px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg text-xs transition shadow-sm whitespace-nowrap flex items-center justify-center gap-1.5">
-            <span>⚡ 선택한 사진 텍스트 자동 추출</span>
+            <span>⚡ ${selectedPhotoIndices.length > 1 ? `선택 사진 ${selectedPhotoIndices.length}장 동시 AI 분석 (앞·뒷면 통합 식별)` : '선택한 사진 텍스트 자동 추출'}</span>
           </button>
         </div>
 
         <div id="ocrLoadingSpinner" class="hidden py-3 text-center text-indigo-600 font-semibold space-y-2">
           <div class="inline-block animate-spin rounded-full h-5 w-5 border-2 border-indigo-600 border-t-transparent"></div>
-          <p class="text-xs">약봉투 및 처방전 활자를 읽어내는 중입니다 (약 2초)...</p>
+          <p class="text-xs" id="ocrLoadingText">
+            선택된 사진(${selectedPhotoIndices.length}장)의 활자 및 낱알 앞·뒷면 각인을 통합 판독하는 중입니다...
+          </p>
         </div>
 
         <!-- 복용 약물 최종 확정 패널 -->
@@ -1962,9 +2031,50 @@
     }
 
     // ========================================================
-    // 8. 사진 선택, 라이트박스, 회신서 연동
+    // 8. 사진 선택 (다중 선택/토글 지원), 라이트박스, 회신서 연동
     // ========================================================
+    function toggleOcrPhoto(idx, event) {
+      if (event) event.stopPropagation();
+      const pos = selectedPhotoIndices.indexOf(idx);
+      if (pos >= 0) {
+        selectedPhotoIndices.splice(pos, 1);
+      } else {
+        selectedPhotoIndices.push(idx);
+      }
+      selectedPhotoIndex = (selectedPhotoIndices && selectedPhotoIndices[0]) || 0;
+      saveCurrentPatientDraft();
+      if (selectedIndex >= 0 && allIntakes[selectedIndex]) {
+        renderDetail(allIntakes[selectedIndex]);
+        restoreInputDraft(allIntakes[selectedIndex].id);
+        attachDraftAutoSaveListeners();
+      }
+    }
+
+    function selectAllOcrPhotos() {
+      if (!currentPhotos || currentPhotos.length === 0) return;
+      selectedPhotoIndices = currentPhotos.map(function(_, idx) { return idx; });
+      selectedPhotoIndex = selectedPhotoIndices[0] || 0;
+      saveCurrentPatientDraft();
+      if (selectedIndex >= 0 && allIntakes[selectedIndex]) {
+        renderDetail(allIntakes[selectedIndex]);
+        restoreInputDraft(allIntakes[selectedIndex].id);
+        attachDraftAutoSaveListeners();
+      }
+    }
+
+    function deselectAllOcrPhotos() {
+      selectedPhotoIndices = [];
+      selectedPhotoIndex = 0;
+      saveCurrentPatientDraft();
+      if (selectedIndex >= 0 && allIntakes[selectedIndex]) {
+        renderDetail(allIntakes[selectedIndex]);
+        restoreInputDraft(allIntakes[selectedIndex].id);
+        attachDraftAutoSaveListeners();
+      }
+    }
+
     function selectOcrPhoto(idx) {
+      selectedPhotoIndices = [idx];
       selectedPhotoIndex = idx;
       saveCurrentPatientDraft();
       if (selectedIndex >= 0 && allIntakes[selectedIndex]) {
@@ -2145,6 +2255,14 @@
     window.handlePatientSearch = handlePatientSearch;
     window.clearPatientSearch = clearPatientSearch;
     window.selectOcrPhoto = selectOcrPhoto;
+    window.toggleOcrPhoto = toggleOcrPhoto;
+    window.selectAllOcrPhotos = selectAllOcrPhotos;
+    window.deselectAllOcrPhotos = deselectAllOcrPhotos;
+    Object.defineProperty(window, 'selectedPhotoIndices', {
+      get: function() { return selectedPhotoIndices; },
+      set: function(v) { selectedPhotoIndices = v; },
+      configurable: true
+    });
     window.openLightboxPhoto = openLightboxPhoto;
     window.toggleStatus = toggleStatus;
     window.openReplyEditor = openReplyEditor;
